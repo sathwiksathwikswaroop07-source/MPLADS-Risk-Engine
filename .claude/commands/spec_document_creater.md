@@ -134,8 +134,11 @@ If none: state "No new dependencies".
 ## Rules for implementation
 Specific constraints Claude must follow. Always include:
 
-- **No ORM.** Raw `sqlite3` only — no SQLAlchemy, no Prisma.
-- **Parameterised queries only.** Never build SQL with f-strings.
+- **SQLAlchemy 2.x ORM** for schema, CRUD, auth and serialisation;
+  **`text()` with bound parameters** for the analytical queries in
+  `checks.py`. No other data-access style.
+- **Parameterised queries only.** Named parameters in `text()`; never
+  f-strings, never `%` formatting, never concatenation.
 - **No ML libraries in the prototype.** Detection is pure statistics
   and rules — median, IQR, date arithmetic, if/else. No scikit-learn,
   no model files, no LLM calls in the scoring path.
