@@ -13,9 +13,9 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 # Pinned, never moved. Every date calculation in the codebase reads this
-# instead of date.today(); otherwise delay scores drift every day, the demo
-# changes overnight, and the recall number on the slide stops matching what
-# the app shows.
+# rather than asking the system clock for the current date; otherwise delay
+# scores drift every day, the demo changes overnight, and the recall number
+# on the slide stops matching what the app shows.
 REFERENCE_DATE = date(2026, 9, 15)
 
 
