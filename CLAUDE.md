@@ -104,7 +104,7 @@ Mark a step complete only when its Definition of Done passes.
 | Step | Feature | Status |
 |---|---|---|
 | 01 | Project skeleton, config, database schema | ☐ |
-| 02 | Dummy data generator with planted anomalies | ☐ |
+| 02 | Dummy data generator with planted anomalies | ☑ |
 | 03 | Detection checks and scoring | ☐ |
 | 04 | API endpoints — two routers | ☐ |
 | 05 | JWT login and scope enforcement | ☐ |

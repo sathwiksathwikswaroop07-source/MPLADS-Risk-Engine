@@ -259,3 +259,158 @@ SEVERITY_BANDS = (
 # change correctly if the dataset spans them.
 ANNUAL_ENTITLEMENT = 50_000_000          # Rs 5 crore, in rupees
 SINGLE_INSTALMENT_FROM = date(2023, 4, 1)
+
+
+# ===========================================================================
+# Generation parameters -- read by generate_data.py ONLY
+# ===========================================================================
+# checks.py must never import anything below this line. Detection compares a
+# work against its actual peers in the data; scoring against the baseline we
+# generated from would be marking our own homework and the recall number
+# would mean nothing.
+
+
+# ---------------------------------------------------------------------------
+# Baseline unit costs
+# ---------------------------------------------------------------------------
+
+# Rupees per unit of `quantity`, before area and terrain multipliers. Units
+# follow WORK_TYPE_UNITS above: km, count, beds or sqm.
+#
+# These live here rather than inside the generator because evaluate.py needs
+# to know what "normal" was in order to plant a work at 4x normal.
+BASE_UNIT_COST = {
+    "road": 4_500_000,          # per km
+    "drain": 2_200_000,         # per km
+    "bridge": 28_000_000,       # per km
+    "borewell": 145_000,        # per borewell
+    "streetlight": 18_000,      # per pole
+    "hospital": 1_400_000,      # per bed
+    "community_hall": 16_000,   # per sqm
+    "school_wall": 2_400,       # per sqm
+}
+
+# Land, labour, utility shifting and traffic-window working all cost more in
+# a metro than in a village.
+AREA_COST_MULTIPLIER = {
+    "metro": 1.55,
+    "urban": 1.25,
+    "semi_urban": 1.05,
+    "rural": 1.00,
+}
+
+# Haulage and access, not construction technique.
+TERRAIN_COST_MULTIPLIER = {
+    "plain": 1.00,
+    "coastal": 1.12,
+    "hilly": 1.35,
+}
+
+# Lognormal sigma applied to every clean work's cost.
+#
+# Bounded on both sides, and the bound is measured rather than guessed. The
+# C1 fence (Q3 + 1.5*IQR) flags 1-4% of clean rows whatever sigma is chosen
+# -- that is inherent to a right-skewed distribution. What matters is where
+# those rows land afterwards, because C1 is fence-gate then ratio-band:
+#
+#   sigma   clears fence   -> 10 pts only   -> 20+ pts
+#    0.20        1.47%           1.40%          0.08%
+#    0.28        2.03%           1.50%          0.53%
+#    0.35        2.52%           0.61%          1.91%
+#    0.45        3.33%           0.05%          3.28%
+#
+# A clean work clearing only the fence scores 10, well under ALERT_MIN_SCORE,
+# so it gets a scores row and no alert. At 0.35+ clean rows start passing 2x
+# the median too and earn alert-grade points. Below 0.25 costs look
+# implausibly uniform. 0.28 sits in the usable window.
+COST_NOISE_SIGMA = 0.28
+
+
+# ---------------------------------------------------------------------------
+# Volume
+# ---------------------------------------------------------------------------
+
+# One seed for the whole run. Determinism is a hard requirement: the recall
+# number on the slide has to match what the app shows tomorrow.
+RANDOM_SEED = 20260915
+
+# CLAUDE.md requires 4000-5000 works. Three dimensions plus district makes
+# peer-ladder rung 1 small, so the dataset has to be large enough that most
+# comparisons land on rung 3 (work_type + terrain + area_type).
+TARGET_WORK_COUNT = 4_500
+
+# Financial years the dataset spans. Straddles SINGLE_INSTALMENT_FROM so both
+# release models are exercised.
+FISCAL_YEARS = ("2022-23", "2023-24", "2024-25", "2025-26")
+
+# Works with progress_pct = 0 and no progress_updates rows, so step 03's
+# graceful-degradation path is exercised by the data rather than by
+# intention. These must record a skip, never silently score zero.
+SPARSE_DATA_WORK_COUNT = 120
+
+
+# ---------------------------------------------------------------------------
+# Planted anomalies
+# ---------------------------------------------------------------------------
+
+# Ground truth for evaluate.py, written into works.planted_anomaly.
+# ~290 planted out of ~4500; everything else must be clean.
+#
+# duplicate_pair counts WORKS, not pairs: 40 works = 20 pairs.
+# quota_shortfall is MP-level and writes no work-level label at all.
+PLANTED_ANOMALY_COUNTS = {
+    "cost_overrun": 60,
+    "long_delay": 80,
+    "impossible_date": 20,
+    "ineligible_work": 20,
+    "duplicate_pair": 40,
+    "payment_ahead_of_work": 40,
+    "ghost_asset": 30,
+}
+
+QUOTA_SHORTFALL_MP_COUNT = 4
+
+# cost_overrun works are planted at this multiple of the config baseline,
+# which approximates the peer median. Comfortably past C1's 4x top band.
+COST_OVERRUN_MULTIPLE_RANGE = (3.0, 6.0)
+
+# long_delay works are sanctioned this many days before REFERENCE_DATE and
+# left unfinished. Spans C2's 365-539 and 540+ bands.
+LONG_DELAY_DAYS_RANGE = (400, 700)
+
+# payment_ahead_of_work: money far ahead of the build.
+PAYMENT_AHEAD_RATIO_RANGE = (0.75, 0.95)
+PAYMENT_AHEAD_PROGRESS_RANGE = (0.10, 0.30)
+
+
+# ---------------------------------------------------------------------------
+# Clean-row guard rails
+# ---------------------------------------------------------------------------
+
+# Everything below exists to stop the generator manufacturing false
+# positives. If clean rows trip checks the false-positive rate is real, and
+# the honest response is to loosen thresholds rather than hide it.
+
+# C2 awards from 180 days. Clean unfinished works stay inside that window, so
+# no clean row can earn delay points at all.
+CLEAN_MAX_DAYS_SINCE_SANCTION = 150
+
+# C7 fires when the payment ratio leads the progress ratio by more than 0.20.
+CLEAN_MAX_PAYMENT_PROGRESS_GAP = 0.12
+
+# C5 pairs works in the same district and work_type whose unit costs are
+# within 10% and whose sanction dates are within 60 days.
+#
+# At 4500 works over ~50 districts and 8 work types this collides by chance
+# roughly 455 times -- 23x the 20 planted pairs -- which would swamp the
+# signal entirely. Widening the cost spread is not enough (log-sd 0.55 still
+# leaves ~278). So clean works are actively de-collided after generation:
+# any clean pair inside both bands has one work's cost nudged outside the
+# band by this margin, before anomalies are planted.
+C5_DECOLLIDE_MARGIN = 0.18
+
+# The de-collision sweep repeats until no collision remains, because moving
+# one cost out of a band can drop it into another work's band. A single pass
+# only got 455 down to 116. Each sweep strictly reduces collisions so the
+# loop terminates on its own; this bound is a safety net, not the exit.
+C5_DECOLLIDE_MAX_SWEEPS = 12
