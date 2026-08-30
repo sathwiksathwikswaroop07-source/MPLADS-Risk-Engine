@@ -9,3 +9,5 @@ smart_india_hackathon/
 
 # Node
 node_modules/
+mplads.db-shm
+mplads.db-wal
