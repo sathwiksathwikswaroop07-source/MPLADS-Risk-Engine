@@ -23,8 +23,10 @@ REFERENCE_DATE = date(2026, 9, 15)
 # Database
 # ---------------------------------------------------------------------------
 
-# Absolute, so the engine resolves the same file whatever the caller's cwd.
-DATABASE_URL = f"sqlite:///{Path(__file__).parent / 'mplads.db'}"
+# Resolved and absolute, so the engine finds the same file whatever the
+# caller's working directory and whatever path the module was invoked by.
+DB_PATH = Path(__file__).resolve().parent / "mplads.db"
+DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +35,10 @@ DATABASE_URL = f"sqlite:///{Path(__file__).parent / 'mplads.db'}"
 
 # A peer group is always a single work_type, so units never mix within a
 # comparison.
+#
+# bridge is measured in km rather than counted: span is most of what drives
+# a bridge's cost, and counting would put a 40 m culvert and an 800 m river
+# crossing in the same peer group.
 WORK_TYPE_UNITS = {
     "road": "km",
     "drain": "km",
@@ -43,6 +49,7 @@ WORK_TYPE_UNITS = {
     "community_hall": "sqm",
     "school_wall": "sqm",
 }
+WORK_TYPES = tuple(WORK_TYPE_UNITS)
 
 TERRAINS = ("plain", "hilly", "coastal")
 AREA_TYPES = ("metro", "urban", "semi_urban", "rural")
@@ -125,6 +132,11 @@ EXPECTED_DURATION_DAYS = {
     ("school_wall", "rural"): 90,
 }
 
+# Defensive only. Every (work_type, area_type) pair above is populated, but
+# a new work_type added without its four rows would otherwise raise
+# KeyError deep inside the generator.
+DEFAULT_DURATION_DAYS = 180
+
 
 # ---------------------------------------------------------------------------
 # Point caps
@@ -132,20 +144,21 @@ EXPECTED_DURATION_DAYS = {
 
 # No single check may award more than its cap, and total_score is clamped
 # to 0-100 after summing.
-C1_MAX_POINTS = 35   # cost outlier            (work)
-C2_MAX_POINTS = 25   # delay                   (work)
-C3_MAX_POINTS = 15   # work compliance         (work)
-C5_MAX_POINTS = 20   # duplicate               (work)
-C6_MAX_POINTS = 15   # citizen reports         (work)
-C7_MAX_POINTS = 20   # paid, no proof of work  (work)
-C3_MP_MAX_POINTS = 25   # quota compliance     (mp)
-C4_MAX_POINTS = 15   # utilisation             (district)
+C1_MAX_POINTS = 35      # cost outlier             (work)
+C2_MAX_POINTS = 25      # delay                    (work)
+C2B_MAX_POINTS = 8      # predicted stall          (work)
+C3_MAX_POINTS = 15      # work compliance          (work)
+C5_MAX_POINTS = 20      # duplicate                (work)
+C6_MAX_POINTS = 15      # citizen reports          (work)
+C7_MAX_POINTS = 35      # paid, no proof of work   (work)
+C3_MP_MAX_POINTS = 25   # quota compliance         (mp)
+C4_MAX_POINTS = 15      # utilisation              (district)
 
 MAX_TOTAL_SCORE = 100
 
 
 # ---------------------------------------------------------------------------
-# C1 — cost outlier
+# C1 - cost outlier
 # ---------------------------------------------------------------------------
 
 # Points scale with distance past the upper IQR fence (Q3 + 1.5 * IQR).
@@ -161,7 +174,7 @@ C1_RATIO_BANDS = (
 
 
 # ---------------------------------------------------------------------------
-# C2 — delay
+# C2 - delay
 # ---------------------------------------------------------------------------
 
 # (min_days, max_days, points). max_days of None means unbounded.
@@ -174,7 +187,22 @@ C2_DELAY_BANDS = (
 
 
 # ---------------------------------------------------------------------------
-# C5 — duplicate detection
+# C2b - predicted stall
+# ---------------------------------------------------------------------------
+
+# Not yet late, but on track to be. This is the "early warning mechanism"
+# the problem statement asks for, and it is what separates "already a
+# problem" from "about to become one".
+#
+# Fires when a work's reported progress is this far below what the elapsed
+# share of its expected duration implies, AND nobody has touched the record
+# in C2B_STALE_DAYS. Both conditions, not either.
+C2B_STALE_DAYS = 90
+C2B_PROGRESS_SHORTFALL = 0.30
+
+
+# ---------------------------------------------------------------------------
+# C5 - duplicate detection
 # ---------------------------------------------------------------------------
 
 C5_UNIT_COST_TOLERANCE = 0.10   # within 10% unit cost
@@ -182,7 +210,7 @@ C5_WINDOW_DAYS = 60             # sanctioned within 60 days of each other
 
 
 # ---------------------------------------------------------------------------
-# C6 — citizen reports
+# C6 - citizen reports
 # ---------------------------------------------------------------------------
 
 # (min_distinct_reporters, points). Only verified complaints count, and the
@@ -195,7 +223,43 @@ C6_REPORT_BANDS = (
 
 
 # ---------------------------------------------------------------------------
-# C3-MP — SC/ST quota compliance
+# C7 - paid, no proof of work
+# ---------------------------------------------------------------------------
+
+# The ghost-asset check. Components are summed, then capped at
+# C7_MAX_POINTS. No single component is conclusive; the combination is.
+
+# Money moving ahead of work. gap = payment_ratio - progress_ratio, where
+# payment_ratio is sum(payments.amount) / cost. Ascending, like the others.
+C7_PAYMENT_GAP_BANDS = (
+    (0.20, 10),
+    (0.35, 18),
+    (0.50, 25),
+)
+
+# Marked completed with zero rows in the evidence table -- no photo, no
+# completion certificate, no handover record. The CAG's most common finding.
+C7_COMPLETED_NO_EVIDENCE = 15
+
+# Nobody has touched the record in this long while most of the money has
+# gone. Works whether or not progress_pct is meaningful, which is why it is
+# the fallback when progress reporting is absent.
+C7_STALE_DAYS = 180
+C7_STALE_MIN_PAYMENT_RATIO = 0.50
+C7_STALE_WHILE_PAID = 12
+
+# Completed in less than this fraction of its expected duration -- a 10 km
+# road finished eight days after sanction.
+C7_FAST_FRACTION = 0.15
+C7_IMPLAUSIBLY_FAST = 12
+
+# The same completion photograph submitted as proof for another work.
+# A self-join on evidence.photo_hash; the hardest component to explain away.
+C7_DUPLICATE_PHOTO = 20
+
+
+# ---------------------------------------------------------------------------
+# C3-MP - SC/ST quota compliance
 # ---------------------------------------------------------------------------
 
 SC_AREA_FLOOR = 0.15    # 15% of released funds
@@ -205,12 +269,24 @@ ST_SHORTFALL_MAX_POINTS = 10
 
 
 # ---------------------------------------------------------------------------
-# C4 — district utilisation
+# C4 - district utilisation
 # ---------------------------------------------------------------------------
 
-C4_UTILISATION_FLOOR = 0.50       # spent/released below this
-C4_UTILISATION_POINTS = 10
-C4_Q4_SPEND_CEILING = 0.60        # more than this share falling in Jan-Mar
+# Measured AGAINST THE CALENDAR, not as a raw unspent balance.
+#
+# Since April 2023 the whole annual entitlement lands at the start of the
+# financial year and is drawn down as needed. A flat "spent/released below
+# 50%" rule would therefore flag every district in the country every June,
+# legitimately unspent. Instead, compare the spend ratio with the share of
+# the financial year that has elapsed: three months in, 25% spent is on
+# track and 5% is not.
+C4_CALENDAR_TOLERANCE = 0.30      # spend ratio this far behind year elapsed
+C4_BEHIND_CALENDAR_POINTS = 10
+
+# March rush: a disproportionate share of the year's spend falling in the
+# final quarter, which usually means money moved to avoid lapsing rather
+# than because work was done.
+C4_Q4_SPEND_CEILING = 0.60
 C4_Q4_BUNCHING_POINTS = 8
 
 
@@ -259,158 +335,68 @@ SEVERITY_BANDS = (
 # change correctly if the dataset spans them.
 ANNUAL_ENTITLEMENT = 50_000_000          # Rs 5 crore, in rupees
 SINGLE_INSTALMENT_FROM = date(2023, 4, 1)
-
-
-# ===========================================================================
-# Generation parameters -- read by generate_data.py ONLY
-# ===========================================================================
-# checks.py must never import anything below this line. Detection compares a
-# work against its actual peers in the data; scoring against the baseline we
-# generated from would be marking our own homework and the recall number
-# would mean nothing.
+HALF_INSTALMENT = ANNUAL_ENTITLEMENT // 2
 
 
 # ---------------------------------------------------------------------------
-# Baseline unit costs
+# Data generation (step 02)
 # ---------------------------------------------------------------------------
 
-# Rupees per unit of `quantity`, before area and terrain multipliers. Units
-# follow WORK_TYPE_UNITS above: km, count, beds or sqm.
+# Fixed seed. Determinism is a project rule: the same command must rebuild
+# the same database, or the recall number stops being reproducible.
+RANDOM_SEED = 26102
+
+# The peer ladder has three dimensions plus district. At 2000 works its
+# first rung averages three rows, which is not a median -- C1 would skip
+# almost everything. 4500 puts most comparisons on rung 3 with a real
+# sample behind them.
+TARGET_WORK_COUNT = 4500
+
+# Planted with a ground-truth label in works.planted_anomaly, so
+# evaluate.py can report recall per category. Roughly 290 of 4500.
 #
-# These live here rather than inside the generator because evaluate.py needs
-# to know what "normal" was in order to plant a work at 4x normal.
-BASE_UNIT_COST = {
-    "road": 4_500_000,          # per km
-    "drain": 2_200_000,         # per km
-    "bridge": 28_000_000,       # per km
-    "borewell": 145_000,        # per borewell
-    "streetlight": 18_000,      # per pole
-    "hospital": 1_400_000,      # per bed
-    "community_hall": 16_000,   # per sqm
-    "school_wall": 2_400,       # per sqm
-}
-
-# Land, labour, utility shifting and traffic-window working all cost more in
-# a metro than in a village.
-AREA_COST_MULTIPLIER = {
-    "metro": 1.55,
-    "urban": 1.25,
-    "semi_urban": 1.05,
-    "rural": 1.00,
-}
-
-# Haulage and access, not construction technique.
-TERRAIN_COST_MULTIPLIER = {
-    "plain": 1.00,
-    "coastal": 1.12,
-    "hilly": 1.35,
-}
-
-# Lognormal sigma applied to every clean work's cost.
-#
-# Bounded on both sides, and the bound is measured rather than guessed. The
-# C1 fence (Q3 + 1.5*IQR) flags 1-4% of clean rows whatever sigma is chosen
-# -- that is inherent to a right-skewed distribution. What matters is where
-# those rows land afterwards, because C1 is fence-gate then ratio-band:
-#
-#   sigma   clears fence   -> 10 pts only   -> 20+ pts
-#    0.20        1.47%           1.40%          0.08%
-#    0.28        2.03%           1.50%          0.53%
-#    0.35        2.52%           0.61%          1.91%
-#    0.45        3.33%           0.05%          3.28%
-#
-# A clean work clearing only the fence scores 10, well under ALERT_MIN_SCORE,
-# so it gets a scores row and no alert. At 0.35+ clean rows start passing 2x
-# the median too and earn alert-grade points. Below 0.25 costs look
-# implausibly uniform. 0.28 sits in the usable window.
-COST_NOISE_SIGMA = 0.28
-
-
-# ---------------------------------------------------------------------------
-# Volume
-# ---------------------------------------------------------------------------
-
-# One seed for the whole run. Determinism is a hard requirement: the recall
-# number on the slide has to match what the app shows tomorrow.
-RANDOM_SEED = 20260915
-
-# CLAUDE.md requires 4000-5000 works. Three dimensions plus district makes
-# peer-ladder rung 1 small, so the dataset has to be large enough that most
-# comparisons land on rung 3 (work_type + terrain + area_type).
-TARGET_WORK_COUNT = 4_500
-
-# Financial years the dataset spans. Straddles SINGLE_INSTALMENT_FROM so both
-# release models are exercised.
-FISCAL_YEARS = ("2022-23", "2023-24", "2024-25", "2025-26")
-
-# Works with progress_pct = 0 and no progress_updates rows, so step 03's
-# graceful-degradation path is exercised by the data rather than by
-# intention. These must record a skip, never silently score zero.
-SPARSE_DATA_WORK_COUNT = 120
-
-
-# ---------------------------------------------------------------------------
-# Planted anomalies
-# ---------------------------------------------------------------------------
-
-# Ground truth for evaluate.py, written into works.planted_anomaly.
-# ~290 planted out of ~4500; everything else must be clean.
-#
-# duplicate_pair counts WORKS, not pairs: 40 works = 20 pairs.
-# quota_shortfall is MP-level and writes no work-level label at all.
+# Everything not listed here must be genuinely clean. If clean rows also
+# trip checks, the false-positive rate is real and the fix is to loosen
+# thresholds, not to hide it.
 PLANTED_ANOMALY_COUNTS = {
-    "cost_overrun": 60,
-    "long_delay": 80,
-    "impossible_date": 20,
-    "ineligible_work": 20,
-    "duplicate_pair": 40,
-    "payment_ahead_of_work": 40,
-    "ghost_asset": 30,
+    "cost_overrun": 60,           # unit cost 3-6x the peer median
+    "long_delay": 80,             # sanctioned 400-700 days ago, unfinished
+    "impossible_date": 20,        # completed_on before sanctioned_on
+    "ineligible_work": 20,        # category from the not-permitted list
+    "duplicate_pair": 40,         # 20 pairs, near-identical within 60 days
+    "payment_ahead_of_work": 40,  # payment ratio 0.75-0.95, progress 0.10-0.30
+    "ghost_asset": 30,            # complete, fully paid, no evidence rows
 }
+PLANTED_QUOTA_SHORTFALL_MPS = 4   # MPs forced under the 15% SC floor
 
-QUOTA_SHORTFALL_MP_COUNT = 4
-
-# cost_overrun works are planted at this multiple of the config baseline,
-# which approximates the peer median. Comfortably past C1's 4x top band.
-COST_OVERRUN_MULTIPLE_RANGE = (3.0, 6.0)
-
-# long_delay works are sanctioned this many days before REFERENCE_DATE and
-# left unfinished. Spans C2's 365-539 and 540+ bands.
-LONG_DELAY_DAYS_RANGE = (400, 700)
-
-# payment_ahead_of_work: money far ahead of the build.
-PAYMENT_AHEAD_RATIO_RANGE = (0.75, 0.95)
-PAYMENT_AHEAD_PROGRESS_RANGE = (0.10, 0.30)
+# Some works must be generated with progress_pct = 0 and no
+# progress_updates rows, so the graceful-degradation path is exercised by
+# the data rather than only by intention.
+WORKS_WITHOUT_PROGRESS_DATA = 400
 
 
 # ---------------------------------------------------------------------------
-# Clean-row guard rails
+# Authentication (step 05)
 # ---------------------------------------------------------------------------
 
-# Everything below exists to stop the generator manufacturing false
-# positives. If clean rows trip checks the false-positive rate is real, and
-# the honest response is to loosen thresholds rather than hide it.
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRY_HOURS = 12
 
-# C2 awards from 180 days. Clean unfinished works stay inside that window, so
-# no clean row can earn delay points at all.
-CLEAN_MAX_DAYS_SINCE_SANCTION = 150
+# Read from the environment at runtime and never stored here or committed.
+# PyJWT warns below 32 bytes for HS256.
+JWT_SECRET_ENV_VAR = "JWT_SECRET"
+JWT_MIN_SECRET_BYTES = 32
 
-# C7 fires when the payment ratio leads the progress ratio by more than 0.20.
-CLEAN_MAX_PAYMENT_PROGRESS_GAP = 0.12
+# Roles that may act on alerts. MPs and the Ministry are view-only: under
+# the scheme an MP recommends works while the District Authority sanctions,
+# executes and verifies them, so letting an MP close an alert on their own
+# constituency's work would invert the accountability the scheme rests on.
+ALERT_ACTOR_ROLES = ("district_officer", "state_officer")
 
-# C5 pairs works in the same district and work_type whose unit costs are
-# within 10% and whose sanction dates are within 60 days.
-#
-# At 4500 works over ~50 districts and 8 work types this collides by chance
-# roughly 455 times -- 23x the 20 planted pairs -- which would swamp the
-# signal entirely. Widening the cost spread is not enough (log-sd 0.55 still
-# leaves ~278). So clean works are actively de-collided after generation:
-# any clean pair inside both bands has one work's cost nudged outside the
-# band by this margin, before anomalies are planted.
-C5_DECOLLIDE_MARGIN = 0.18
-
-# The de-collision sweep repeats until no collision remains, because moving
-# one cost out of a band can drop it into another work's band. A single pass
-# only got 455 down to 116. Each sweep strictly reduces collisions so the
-# loop terminates on its own; this bound is a safety net, not the exit.
-C5_DECOLLIDE_MAX_SWEEPS = 12
+# Alerts about an MP or a district are routed to the State Officer, never
+# only to the person the alert is about.
+SUBJECT_ROUTING = {
+    "work": "district_officer",
+    "mp": "state_officer",
+    "district": "state_officer",
+}
