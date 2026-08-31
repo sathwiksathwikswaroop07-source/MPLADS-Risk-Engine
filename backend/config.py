@@ -603,4 +603,9 @@ SUBJECT_ROUTING = {
     "work": "district_officer",
     "mp": "state_officer",
     "district": "state_officer",
+    # A vendor operates in exactly one district, so their pricing conduct is
+    # the District Officer's to review -- they are the ones who tender to
+    # them. Unlike the MP and district rows above, this is not an alert about
+    # the recipient themselves, so there is no conflict in routing it locally.
+    "vendor": "district_officer",
 }

@@ -303,3 +303,87 @@ def record_action(session, principal: Principal, action: str,
         detail=detail,
         created_at=datetime.now(timezone.utc).isoformat(),
     ))
+
+
+# ---------------------------------------------------------------------------
+# Alert scoping, across every subject type
+# ---------------------------------------------------------------------------
+
+# `scope_filter` above answers "which works may this principal see", which is
+# all the citizen portal needs. The officer worklist is wider: an alert can be
+# about a work, an MP, a district or a vendor, and only the first of those
+# reaches a district through `works`.
+#
+# Each subject type therefore carries its own join and its own scope columns.
+# Keeping them in one table rather than in the route is the same rule as
+# before -- a WHERE clause written per route is a route somebody forgets.
+#
+# `join` is ANDed into the FROM clause of the worklist query, which already
+# selects from scores. Every fragment here is code-owned; only values are
+# bound.
+_ALERT_SCOPE = {
+    "work": {
+        "join": ("JOIN works ON works.work_id = scores.subject_id "
+                 "JOIN districts ON districts.district_id = works.district_id"),
+        "constituency": "works.constituency_id",
+        "district": "works.district_id",
+        "state": "districts.state_id",
+    },
+    "vendor": {
+        "join": ("JOIN vendors ON vendors.vendor_id = scores.subject_id "
+                 "JOIN districts "
+                 "ON districts.district_id = vendors.district_id"),
+        # A vendor has no constituency; a constituency-scoped principal sees
+        # none, which is correct -- vendors are a procurement concern.
+        "constituency": None,
+        "district": "vendors.district_id",
+        "state": "districts.state_id",
+    },
+    "mp": {
+        "join": "JOIN mps ON mps.mp_id = scores.subject_id",
+        "constituency": "mps.constituency_id",
+        # Quota shortfall routes to the State Officer, never to the district
+        # -- and never only to the member the alert is about.
+        "district": None,
+        "state": "mps.state_id",
+    },
+    "district": {
+        "join": ("JOIN districts "
+                 "ON districts.district_id = scores.subject_id"),
+        "constituency": None,
+        "district": "districts.district_id",
+        "state": "districts.state_id",
+    },
+}
+
+ALERT_SUBJECT_TYPES = tuple(sorted(_ALERT_SCOPE))
+
+
+def alert_scope_clause(principal: Principal,
+                       subject_type: str) -> tuple[str, str, dict] | None:
+    """(join, where, params) for one subject type, or None if out of scope.
+
+    None means this principal sees no alerts of this type at all -- a district
+    officer and MP-quota alerts, say. That is a real answer, not an error: the
+    caller simply skips the subject type rather than emitting a query that
+    would return everything.
+
+    Note the JOIN is always paired with the type filter by the caller, because
+    scores.subject_id is polymorphic. Joining `mps` on a subject_id that
+    belongs to a work would match a completely unrelated member, and it would
+    do so silently.
+    """
+    spec = _ALERT_SCOPE.get(subject_type)
+    if spec is None:
+        return None
+
+    if principal.is_national:
+        return spec["join"], "1 = 1", {}
+
+    column = spec.get(principal.scope_type)
+    if column is None or principal.scope_id is None:
+        return None
+
+    return spec["join"], f"{column} = :scope_id", {
+        "scope_id": principal.scope_id,
+    }
