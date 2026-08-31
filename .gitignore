@@ -7,6 +7,11 @@ __pycache__/
 .venv/
 smart_india_hackathon/
 
+# Secrets -- JWT_SECRET must never be committed (see CLAUDE.md)
+.env
+.env.*
+!.env.example
+
 # Node
 node_modules/
 mplads.db-shm

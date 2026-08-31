@@ -32,7 +32,8 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cd frontend && npm install && cd ..
 
-export JWT_SECRET="$(python -c 'import secrets;print(secrets.token_urlsafe(48))')"
+cp .env.example .env                # then put a secret in it:
+python -c 'import secrets;print(secrets.token_urlsafe(48))'
 
 python -m backend.db                # creates empty mplads.db
 python -m backend.generate_data     # fills it, ~4500 works
@@ -46,10 +47,14 @@ cd frontend && npm run dev          # port 5173
 `generate_data.py` drops and recreates everything. Always safe to
 re-run. `checks.py` rebuilds `scores` and `alerts` only.
 
-**`JWT_SECRET` is per-shell.** A new terminal does not have it, and the
-demo password is `mplads2026`. The app refuses to start without the
-secret rather than failing later on the first login, so if `uvicorn`
-exits with `JWT_SECRET is not set`, re-run the `export` line above.
+`backend/config.py` loads `.env` at import, so the secret survives a new
+terminal -- an `export` does not. A real environment variable still wins,
+so CI and a deployment override the file. **`.env` is gitignored and must
+never be committed**; `.env.example` is the tracked template.
+
+Without a secret the app refuses to start rather than failing later on the
+first login. If `uvicorn` exits with `JWT_SECRET is not set`, the `.env` is
+missing or empty. The demo password is `mplads2026`.
 
 ---
 

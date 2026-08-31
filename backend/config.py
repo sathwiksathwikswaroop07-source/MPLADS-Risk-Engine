@@ -5,6 +5,7 @@ must be able to retune any detection threshold by editing this file alone,
 without touching checks.py.
 """
 
+import os
 from datetime import date
 from pathlib import Path
 
@@ -590,6 +591,37 @@ JWT_EXPIRY_HOURS = 12
 # PyJWT warns below 32 bytes for HS256.
 JWT_SECRET_ENV_VAR = "JWT_SECRET"
 JWT_MIN_SECRET_BYTES = 32
+
+# Project root -- the directory above backend/.
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
+
+def load_env_file(path: Path = ENV_FILE) -> None:
+    """Load KEY=value lines from .env into the environment, if it exists.
+
+    An exported shell variable lives only in the shell that ran the export,
+    so every new terminal loses JWT_SECRET and the app refuses to start. That
+    is a real trip hazard mid-demo, when the shell being used is rarely the
+    one the secret was generated in.
+
+    A real environment variable always wins, so CI and a deployment override
+    the file rather than fight it. The file is gitignored: the secret must
+    never be committed. Written by hand rather than pulling in python-dotenv,
+    which would be a dependency for fifteen lines.
+    """
+    if not path.is_file():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        # Never clobber a variable the caller set deliberately.
+        os.environ.setdefault(key, value)
+
+
+load_env_file()
 
 # Roles that may act on alerts. MPs and the Ministry are view-only: under
 # the scheme an MP recommends works while the District Authority sanctions,
