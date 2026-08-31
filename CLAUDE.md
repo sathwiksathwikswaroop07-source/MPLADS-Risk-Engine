@@ -29,8 +29,7 @@ project record.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install sqlalchemy fastapi uvicorn pandas faker pyjwt werkzeug \
-            python-multipart openpyxl
+pip install -r requirements.txt
 cd frontend && npm install && cd ..
 
 export JWT_SECRET="$(python -c 'import secrets;print(secrets.token_urlsafe(48))')"

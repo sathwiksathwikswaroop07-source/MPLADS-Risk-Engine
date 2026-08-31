@@ -1,0 +1,57 @@
+# MPLADS Risk Engine -- Python dependencies
+#
+#   python -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+#
+# Pinned to the versions this project was built and verified against, so a
+# teammate's checkout scores the same works the same way. The recall number
+# on the slide depends on the whole pipeline being reproducible, not just on
+# the fixed random seed.
+
+# --- Database and models --------------------------------------------------
+# ORM for schema, CRUD, auth and serialisation. Analytical queries in
+# checks.py use text() with bound parameters instead; there is no third
+# data-access style. SQLite itself ships with Python.
+SQLAlchemy==2.0.52
+
+# --- API ------------------------------------------------------------------
+fastapi==0.141.1
+uvicorn==0.52.4
+# Request-body validation. Arrives with FastAPI, pinned here because the
+# resolve endpoint's required verdict and note are enforced by a model.
+pydantic==2.13.4
+# Multipart form parsing, for the CSV/Excel upload in step 11.
+python-multipart==0.0.32
+
+# --- Authentication -------------------------------------------------------
+# JWT signing and verification. There is no session table.
+PyJWT==2.13.0
+# Password hashing (scrypt). Never plaintext, never a homemade hash.
+Werkzeug==3.1.8
+
+# --- Data generation ------------------------------------------------------
+# Generated names and addresses. The dataset is generated, never scraped.
+Faker==40.37.0
+
+# --- Spreadsheet upload ---------------------------------------------------
+# Reads the .xlsx an officer exports from eSAKSHI (step 11).
+openpyxl==3.1.5
+
+# --- Testing --------------------------------------------------------------
+# Required by fastapi.testclient, which is how the API's access-control
+# guarantees are verified -- driven through HTTP rather than by reading the
+# database.
+httpx==0.28.1
+
+# Deliberately absent:
+#
+#   pandas          CLAUDE.md's Quickstart lists it, but nothing imports it.
+#                   The generator builds rows with the ORM and checks.py does
+#                   its statistics with the standard library. Adding a large
+#                   dependency for nothing is worse than a stale README line.
+#
+#   scikit-learn    and every other ML library. Detection is median, IQR,
+#   and friends      date arithmetic and rules -- no model files, no LLM in
+#                   the scoring path. This is a deliberate constraint, not an
+#                   omission: every point awarded has to be explainable to an
+#                   officer in one sentence.
