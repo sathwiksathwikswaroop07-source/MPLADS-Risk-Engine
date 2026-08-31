@@ -22,23 +22,35 @@ export default function AlertDetail({ basePath, portalName }) {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(() => {
+  // Bumped after every workflow action: no action response carries the full
+  // record, and snooze reports a hardcoded "open" status, so the alert is
+  // always re-read rather than patched from what came back.
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    // Guards against a response for a previous alertId landing after the
+    // user has already navigated to another alert.
+    let current = true;
+
     setLoading(true);
     setError(null);
-    return api.getAlert(alertId)
-      .then(setAlert)
-      .catch(setError)
-      .finally(() => setLoading(false));
-  }, [alertId]);
 
-  useEffect(() => { load(); }, [load]);
+    api.getAlert(alertId)
+      .then((result) => { if (current) { setAlert(result); setError(null); } })
+      .catch((err) => { if (current) { setError(err); setAlert(null); } })
+      .finally(() => { if (current) setLoading(false); });
+
+    return () => { current = false; };
+  }, [alertId, attempt]);
+
+  const reload = useCallback(() => setAttempt((n) => n + 1), []);
 
   return (
     <Layout portalName={portalName} home={basePath}>
       <Link className="back-link" to={basePath}>&larr; Back to worklist</Link>
 
       {loading && <Loading label="Loading alert..." />}
-      {!loading && error && <ErrorBox error={error} onRetry={load} />}
+      {!loading && error && <ErrorBox error={error} onRetry={reload} />}
 
       {!loading && !error && alert && (
         <>
@@ -67,7 +79,7 @@ export default function AlertDetail({ basePath, portalName }) {
           <PointsBreakdown alert={alert} />
 
           {alert.can_act
-            ? <ActionBar alert={alert} onDone={load} />
+            ? <ActionBar alert={alert} onDone={reload} />
             : <p className="readonly-note">
                 This account can review alerts but not act on them. Under the
                 scheme the District Authority sanctions and verifies works.

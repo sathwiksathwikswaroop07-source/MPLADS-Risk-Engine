@@ -29,11 +29,11 @@ export default function ActionBar({ alert, onDone }) {
       setNote("");
       // The snooze response reports a hardcoded "open" and no response
       // carries the full record, so the alert is re-fetched rather than
-      // patched from what came back.
-      await onDone();
+      // patched from what came back. This only schedules the re-read; the
+      // parent unmounts or repaints this bar when it lands.
+      onDone();
     } catch (err) {
       setError(err.detail || "The action could not be completed.");
-    } finally {
       setBusy(false);
     }
   }

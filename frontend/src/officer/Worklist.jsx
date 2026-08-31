@@ -40,17 +40,28 @@ export default function Worklist({ basePath, portalName }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Bumped to re-run the fetch after an explicit retry, since the filters
+  // themselves have not changed in that case.
+  const [attempt, setAttempt] = useState(0);
 
-  const load = useCallback(() => {
+  useEffect(() => {
+    // Changing filters quickly leaves earlier requests in flight. Without
+    // this guard a slow first response can land after a faster second one
+    // and repaint the list with the wrong filter's rows.
+    let current = true;
+
     setLoading(true);
     setError(null);
-    api.getAlerts(filters)
-      .then(setData)
-      .catch(setError)
-      .finally(() => setLoading(false));
-  }, [filters]);
 
-  useEffect(load, [load]);
+    api.getAlerts(filters)
+      .then((result) => { if (current) { setData(result); setError(null); } })
+      .catch((err) => { if (current) { setError(err); setData(null); } })
+      .finally(() => { if (current) setLoading(false); });
+
+    return () => { current = false; };
+  }, [filters, attempt]);
+
+  const reload = useCallback(() => setAttempt((n) => n + 1), []);
 
   const filtered = Boolean(filters.status || filters.severity || filters.subject_type);
 
@@ -88,7 +99,7 @@ export default function Worklist({ basePath, portalName }) {
       </div>
 
       {loading && <Loading label="Loading worklist..." />}
-      {!loading && error && <ErrorBox error={error} onRetry={load} />}
+      {!loading && error && <ErrorBox error={error} onRetry={reload} />}
 
       {!loading && !error && data && (
         data.alerts.length === 0 ? (
