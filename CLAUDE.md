@@ -119,7 +119,7 @@ Mark a step complete only when its Definition of Done passes.
 | 03 | Detection checks and scoring | ☑ |
 | 04 | API endpoints — two routers | ☑ |
 | 05 | JWT login and scope enforcement | ☑ |
-| 06 | Officer alert list | ☐ |
+| 06 | Officer alert list | ☑ |
 | 07 | Alert detail with evidence pack | ☑ |
 | 08 | Accuracy evaluation script | ☑ |
 | 09 | Ministry / State dashboards | ☐ |
@@ -879,8 +879,10 @@ step is not done.
 ## Demo notes
 
 - Log in as `do.pune` → alerts. Log out, `do.nashik` → different list.
-  Paste Pune's alert URL into Nashik's session → **403**. Ten seconds,
-  and access control is proven rather than described.
+  Paste Pune's alert URL into Nashik's session → **404**. Ten seconds,
+  and access control is proven rather than described. It is 404 rather
+  than 403 on purpose: the response must not confirm that the alert
+  exists. Say "the alert is hidden, not refused".
 - Show the State Officer once — the MP-quota and district-utilisation
   alerts he gets that the district officer does not.
 - Excel upload answers "how does this connect to eSAKSHI?" in five
