@@ -1144,7 +1144,7 @@ def reconcile_allocations(session, rng, works, allocations, mps):
     # Force the SC-area share below the 15% floor for a few MPs by clearing
     # the flag on their SC works.
     eligible = sorted({w.mp_id for w in works})
-    shortfall_mps = rng.sample(eligible, config.QUOTA_SHORTFALL_MP_COUNT)
+    shortfall_mps = rng.sample(eligible, config.PLANTED_QUOTA_SHORTFALL_MPS)
     for mp_id in shortfall_mps:
         mp_works = [w for w in works if w.mp_id == mp_id and w.is_sc_area == 1]
         total = sum(_cost_of(w) for w in works if w.mp_id == mp_id)
@@ -1211,7 +1211,7 @@ def generate() -> dict:
             key=lambda w: w.work_id)
         sparse = rng.sample(
             clean_in_progress,
-            min(config.SPARSE_DATA_WORK_COUNT, len(clean_in_progress)))
+            min(config.WORKS_WITHOUT_PROGRESS_DATA, len(clean_in_progress)))
         for work in sparse:
             work.progress_pct = 0.0
         sparse_ids = {w.work_id for w in sparse}
