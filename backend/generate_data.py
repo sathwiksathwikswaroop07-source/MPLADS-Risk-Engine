@@ -33,6 +33,7 @@ from backend.db import get_session, init_db
 from backend.models import (
     Agency,
     Allocation,
+    AuditLog,
     Complaint,
     Constituency,
     District,
@@ -1217,12 +1218,30 @@ def reconcile_allocations(session, rng, works, allocations, mps):
 
     # Force the SC-area share below the 15% floor for a few MPs by clearing
     # the flag on their SC works.
-    eligible = sorted({w.mp_id for w in works})
+    #
+    # The target is a fraction of RELEASED funds, because that is the
+    # denominator C3-MP measures against. Taking it from total work cost
+    # instead leaves the planting silently ineffective: works routinely cost
+    # several times what was released in any one year, so a target set at 40%
+    # of the floor-times-total-cost still lands comfortably above the floor
+    # once divided by released, and every planted MP passes the check.
+    released_by_mp = {}
+    for allocation in allocations:
+        released_by_mp[allocation.mp_id] = (
+            released_by_mp.get(allocation.mp_id, 0) + allocation.released)
+
+    eligible = sorted(
+        mp_id for mp_id in {w.mp_id for w in works}
+        if released_by_mp.get(mp_id, 0) > 0
+    )
     shortfall_mps = rng.sample(eligible, config.PLANTED_QUOTA_SHORTFALL_MPS)
     for mp_id in shortfall_mps:
-        mp_works = [w for w in works if w.mp_id == mp_id and w.is_sc_area == 1]
-        total = sum(_cost_of(w) for w in works if w.mp_id == mp_id)
-        target = total * (config.SC_AREA_FLOOR * 0.4)
+        mp_works = [w for w in works
+                    if w.mp_id == mp_id and w.is_sc_area == 1
+                    and w.status != "recommended"]
+        # Well under the floor, so the shortfall is unambiguous rather than
+        # sitting on the boundary where rounding decides the outcome.
+        target = released_by_mp[mp_id] * config.SC_AREA_FLOOR * 0.4
         running = 0
         for work in sorted(mp_works, key=lambda w: w.work_id):
             if running + _cost_of(work) <= target:
@@ -1232,6 +1251,35 @@ def reconcile_allocations(session, rng, works, allocations, mps):
 
     session.flush()
     return shortfall_mps
+
+
+def record_planted_subjects(session, subject_type: str, label: str,
+                            subject_ids: list[int]) -> None:
+    """Persist which MPs or vendors were planted, so recall can be measured.
+
+    works.planted_anomaly carries the ground truth for the seven work-level
+    labels, but quota_shortfall is chosen per MP and vendor_overpricing per
+    vendor, and neither table has such a column. Without a record the ids are
+    discarded at the end of generation and evaluate.py has nothing to compare
+    against -- it cannot infer them from the scores, because far more MPs
+    cross the alert threshold than were ever planted.
+
+    audit_log is the right home: it already exists for system provenance,
+    takes a NULL user_id for actions the system took itself, and its
+    subject_type/subject_id pair is already polymorphic.
+    """
+    session.add_all([
+        AuditLog(
+            user_id=None,
+            action="planted_anomaly",
+            subject_type=subject_type,
+            subject_id=subject_id,
+            detail=label,
+            created_at=_iso(config.REFERENCE_DATE),
+        )
+        for subject_id in sorted(subject_ids)
+    ])
+    session.flush()
 
 
 # ---------------------------------------------------------------------------
@@ -1301,6 +1349,13 @@ def generate() -> dict:
             session, rng, fake, works, users, sparse_ids)
         shortfall_mps = reconcile_allocations(
             session, rng, works, allocations, mps)
+
+        # Ground truth for the two subject-level anomalies, which have no
+        # planted_anomaly column to live in.
+        record_planted_subjects(session, "mp", "quota_shortfall",
+                                shortfall_mps)
+        record_planted_subjects(session, "vendor", "vendor_overpricing",
+                                overpriced_vendors)
 
         planted = {}
         for work in works:

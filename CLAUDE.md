@@ -109,10 +109,10 @@ Mark a step complete only when its Definition of Done passes.
 | 02 | Dummy data generator with planted anomalies | ☑ |
 | 03 | Detection checks and scoring | ☑ |
 | 04 | API endpoints — two routers | ☐ |
-| 05 | JWT login and scope enforcement | ☐ |
+| 05 | JWT login and scope enforcement | ☑ |
 | 06 | Officer alert list | ☐ |
 | 07 | Alert detail with evidence pack | ☐ |
-| 08 | Accuracy evaluation script | ☐ |
+| 08 | Accuracy evaluation script | ☑ |
 | 09 | Ministry / State dashboards | ☐ |
 | 10 | Citizen portal and complaint page | ☐ |
 | 11 | CSV / Excel upload | ☐ |
