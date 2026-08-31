@@ -152,7 +152,7 @@ C3_MAX_POINTS = 15      # work compliance          (work)
 C5_MAX_POINTS = 20      # duplicate                (work)
 C6_MAX_POINTS = 15      # citizen reports          (work)
 C7_MAX_POINTS = 35      # paid, no proof of work   (work)
-C3_MP_MAX_POINTS = 25   # quota compliance         (mp)
+C3_MP_MAX_POINTS = 48   # quota compliance         (mp)
 C4_MAX_POINTS = 15      # utilisation              (district)
 C8_MAX_POINTS = 30      # vendor pricing conduct   (vendor)
 
@@ -266,8 +266,31 @@ C7_DUPLICATE_PHOTO = 20
 
 SC_AREA_FLOOR = 0.15    # 15% of released funds
 ST_AREA_FLOOR = 0.075   # 7.5% of released funds
-SC_SHORTFALL_MAX_POINTS = 15
-ST_SHORTFALL_MAX_POINTS = 10
+
+# Breaching a floor is scored in two parts: a flat award for being under it
+# at all, plus a component scaled by how far short the spend falls.
+#
+# The flat part is what makes the check useful. With a purely proportional
+# award, an MP at a 5.5% SC share -- barely a third of the statutory floor --
+# scored 15 * (0.15-0.055)/0.15 = 9, and the only way to reach the alert
+# threshold was to miss BOTH floors almost entirely. A single unambiguous
+# breach of a statutory floor could not reach an officer, which made the
+# check decorative: the four MPs the generator plants under the SC floor were
+# all detected and none of them alerted.
+#
+# A missed floor is a compliance fact that stands on its own, so it carries
+# the flat award on its own. The scaled part still separates a near miss from
+# spending nothing at all.
+# Sized so that breaching one floor by a clear margin reaches
+# ALERT_MIN_SCORE on its own: at a third of the SC floor the scaled part
+# contributes about two thirds of its range, so 14 + 15*0.66 = 24-25. A
+# member sitting just under a floor still scores below the threshold, which
+# is the intended behaviour -- a near miss is a note for the next sanction
+# round, not a case to open.
+SC_SHORTFALL_BASE_POINTS = 14
+SC_SHORTFALL_SCALED_POINTS = 15
+ST_SHORTFALL_BASE_POINTS = 9
+ST_SHORTFALL_SCALED_POINTS = 10
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +441,25 @@ PLANTED_ANOMALY_COUNTS = {
     "ghost_asset": 30,            # complete, fully paid, no evidence rows
 }
 PLANTED_QUOTA_SHORTFALL_MPS = 4   # MPs forced under the 15% SC floor
+
+# Share of works flagged as falling in a Scheduled Caste or Scheduled Tribe
+# area. The statutory floors are measured on SPEND, not on the number of
+# works, so these must sit clear of SC_AREA_FLOOR and ST_AREA_FLOOR with
+# room to spare: works vary in cost, so a flag rate merely equal to the
+# floor leaves half the members under it by ordinary sampling noise.
+#
+# At 0.22 / 0.11 -- barely above the 0.15 / 0.075 floors -- 46 of 73 members
+# breached the SC floor and 51 breached ST, so a compliance check meant to
+# distinguish four planted members flagged most of the house.
+#
+# The margin has to cover the drag from utilisation as well. A flag rate
+# converts to a share of SPEND, while the floors are measured against funds
+# RELEASED, and median utilisation is about two thirds -- so a flag rate of
+# f lands near 0.66*f against the floor. These are set so that even the
+# lower tail of that distribution clears the floor, leaving the members the
+# generator deliberately pushes under it as the ones the check finds.
+SC_AREA_WORK_SHARE = 0.50
+ST_AREA_WORK_SHARE = 0.26
 
 # Some works must be generated with progress_pct = 0 and no
 # progress_updates rows, so the graceful-degradation path is exercised by

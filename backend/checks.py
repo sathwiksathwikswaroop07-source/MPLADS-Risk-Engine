@@ -796,19 +796,21 @@ def check_c3_mp_quota(mp_row: dict, subject: Subject):
     findings = []
     total = 0
 
-    for label, spent, floor, cap in (
-        ("Scheduled Caste", mp_row["sc_spent"] or 0,
-         config.SC_AREA_FLOOR, config.SC_SHORTFALL_MAX_POINTS),
-        ("Scheduled Tribe", mp_row["st_spent"] or 0,
-         config.ST_AREA_FLOOR, config.ST_SHORTFALL_MAX_POINTS),
+    for label, spent, floor, base, scaled in (
+        ("Scheduled Caste", mp_row["sc_spent"] or 0, config.SC_AREA_FLOOR,
+         config.SC_SHORTFALL_BASE_POINTS, config.SC_SHORTFALL_SCALED_POINTS),
+        ("Scheduled Tribe", mp_row["st_spent"] or 0, config.ST_AREA_FLOOR,
+         config.ST_SHORTFALL_BASE_POINTS, config.ST_SHORTFALL_SCALED_POINTS),
     ):
         share = spent / released
         if share >= floor:
             continue
-        # Scaled by how far short it falls, so a near miss is not treated
-        # like spending nothing at all.
+        # A breached statutory floor carries the flat award on its own; the
+        # scaled part then separates a near miss from spending nothing at
+        # all. Purely proportional scoring put an MP at a third of the floor
+        # below the alert threshold, so the breach never reached an officer.
         shortfall = (floor - share) / floor
-        points = int(round(cap * min(1.0, shortfall)))
+        points = base + int(round(scaled * min(1.0, shortfall)))
         if points <= 0:
             continue
         total += points

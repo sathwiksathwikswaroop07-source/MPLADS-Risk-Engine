@@ -148,15 +148,28 @@ COASTAL_DISTRICTS = frozenset({
 AGENCY_TYPES = ("pwd", "zilla_parishad", "municipal", "other")
 
 # Quantity ranges per work_type, in that type's unit.
+#
+# Sized so a work costs what an MPLADS work actually costs -- lakhs, not
+# crores. The scheme releases Rs 5 crore per MP per year and a member
+# recommends of the order of 25 works against it, so the average work has to
+# land near Rs 20 lakh for the arithmetic to be possible at all.
+#
+# These were too large by roughly an order of magnitude: a 6 km road at
+# Rs 45 lakh/km came to Rs 2.7 crore, over half of one member's annual
+# entitlement on a single work, and a 31-bed hospital came to Rs 4.3 crore.
+# Total spend per MP-FY reached Rs 44 crore against a Rs 5 crore release --
+# 8.8x the statutory ceiling. Every allocation then clamped to spent ==
+# released, which made district utilisation exactly 1.0 everywhere and left
+# C4 unable to fire on any district in the country.
 QUANTITY_RANGES = {
-    "road": (0.8, 12.0),          # km
-    "drain": (0.4, 6.0),          # km
-    "bridge": (0.05, 0.9),        # km
-    "borewell": (1, 12),          # count
-    "streetlight": (10, 220),     # count
-    "hospital": (4, 60),          # beds
-    "community_hall": (90, 850),  # sqm
-    "school_wall": (120, 1400),   # sqm
+    "road": (0.08, 0.9),          # km
+    "drain": (0.06, 0.5),         # km
+    "bridge": (0.008, 0.05),      # km
+    "borewell": (1, 4),           # count
+    "streetlight": (10, 60),      # count
+    "hospital": (1, 5),           # beds
+    "community_hall": (40, 180),  # sqm
+    "school_wall": (80, 450),     # sqm
 }
 
 # Sampling weights. Rural and plain dominate, as they do in the scheme, but
@@ -679,8 +692,8 @@ def build_works(session, rng, fake, districts, constituencies, mps, agencies,
             last_updated_on=_iso(last_updated_on),
             lat=round(rng.uniform(8.2, 33.5), 5),
             lon=round(rng.uniform(69.5, 94.5), 5),
-            is_sc_area=1 if rng.random() < 0.22 else 0,
-            is_st_area=1 if rng.random() < 0.11 else 0,
+            is_sc_area=1 if rng.random() < config.SC_AREA_WORK_SHARE else 0,
+            is_st_area=1 if rng.random() < config.ST_AREA_WORK_SHARE else 0,
             planted_anomaly=None,
         )
         works.append(work)
@@ -1212,6 +1225,12 @@ def reconcile_allocations(session, rng, works, allocations, mps):
             continue
         spent[(work.mp_id, work.fy)] = spent.get((work.mp_id, work.fy), 0) + _cost_of(work)
 
+    # The min() is a bound, not a correction: a member cannot draw more than
+    # was released to them. It should almost never bind now that works are
+    # sized realistically against the entitlement. When it bound routinely it
+    # silently pinned spent == released for every allocation, so the spend
+    # ratio was 1.0 everywhere, and C4 -- which compares that ratio with the
+    # share of the year elapsed -- could not fire on any district.
     for allocation in allocations:
         allocation.spent = min(
             spent.get((allocation.mp_id, allocation.fy), 0), allocation.released)
@@ -1241,7 +1260,12 @@ def reconcile_allocations(session, rng, works, allocations, mps):
                     and w.status != "recommended"]
         # Well under the floor, so the shortfall is unambiguous rather than
         # sitting on the boundary where rounding decides the outcome.
-        target = released_by_mp[mp_id] * config.SC_AREA_FLOOR * 0.4
+        #
+        # At 0.4 the planted share landed near 6% against a 15% floor, which
+        # scored just under the alert threshold for a member who met the ST
+        # floor -- the anomaly was real, detected, and still invisible to an
+        # officer. A fifth of the floor is decisively short.
+        target = released_by_mp[mp_id] * config.SC_AREA_FLOOR * 0.2
         running = 0
         for work in sorted(mp_works, key=lambda w: w.work_id):
             if running + _cost_of(work) <= target:
