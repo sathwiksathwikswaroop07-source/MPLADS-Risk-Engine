@@ -20,9 +20,10 @@ the number on the slide:
   are generation hints. The work's own terrain and area_type are the truth,
   and reading the district's would excuse a flat road in a hill district.
 
-Checks run at three levels -- work, mp, district -- and the levels never mix.
-Awarding an MP's quota shortfall to each of their works would flag every work
-that MP ever recommended: a false-positive machine.
+Checks run at four levels -- work, mp, district, vendor -- and the levels
+never mix. Awarding an MP's quota shortfall to each of their works, or a
+vendor's pricing pattern to each of their contracts, would flag every job
+that member recommended or that contractor won: a false-positive machine.
 """
 
 from __future__ import annotations
@@ -119,6 +120,8 @@ class Subject:
         "C6": "public_points",
         "C7": "evidence_points",
         "C4": "utilisation_points",
+        # A pricing signal, so it shares the cost column.
+        "C8": "cost_points",
     }
 
     def __init__(self, subject_type: str, subject_id: int):
@@ -182,6 +185,7 @@ class Subject:
 _WORKS_SQL = text("""
     SELECT works.work_id, works.mp_id, works.constituency_id,
            works.district_id, districts.state_id AS state_id,
+           works.vendor_id, works.agency_id,
            works.fy, works.work_type, works.description, works.terrain,
            works.area_type, works.quantity, works.unit,
            COALESCE(works.final_cost, works.estimated_cost) AS cost,
@@ -318,17 +322,35 @@ class PeerGroups:
 
 
 def _unit_cost(work: dict) -> float | None:
-    """Cost per unit of quantity.
+    """Cost per unit of quantity, in constant base-year prices.
 
     Cost is always COALESCE(final_cost, estimated_cost) -- never final_cost
     alone, which is NULL for every unfinished work and would silently exclude
     exactly the ones most likely to be problems.
+
+    Deflated by COST_INDEX before it is returned, because the peer ladder has
+    no year dimension: a 2024-25 work would otherwise be compared with
+    2022-23 peers at face value and look expensive purely for being recent.
+    Measured on generated data, comparing nominal costs pushes C1's
+    clean-row false positives from 1.49% to 1.70%; deflating restores them
+    exactly.
+
+    Giving the ladder an `fy` rung instead would split every peer group
+    roughly threefold and push many under PEER_GROUP_MIN_ROWS, so C1 would
+    skip far more often. Normalising removes the bias without shrinking the
+    comparison.
+
+    This is not the generator's baseline cost table. A price index is a
+    published economic fact -- a deployment would read the WPI construction
+    series -- whereas the baseline is the answer we invented, and scoring
+    against that would be marking our own homework.
     """
     if not work["quantity"] or work["quantity"] <= 0:
         return None
     if work["cost"] is None or work["cost"] <= 0:
         return None
-    return work["cost"] / work["quantity"]
+    index = config.COST_INDEX.get(work["fy"], 1.0)
+    return work["cost"] / work["quantity"] / index
 
 
 def check_c1_cost_outlier(work: dict, peers: PeerGroups, subject: Subject):
@@ -374,10 +396,12 @@ def check_c1_cost_outlier(work: dict, peers: PeerGroups, subject: Subject):
                  _band_points(ratio, config.C1_RATIO_BANDS))
     points = min(points, config.C1_MAX_POINTS)
 
+    index = config.COST_INDEX.get(work["fy"], 1.0)
     reason = (
         f"Cost per {work['unit']} is {_rupees(unit_cost)} against a median of "
-        f"{_rupees(median)} for {len(values)} comparable works ({ratio:.1f}x). "
-        "This is above the range those works occupy and needs verification."
+        f"{_rupees(median)} for {len(values)} comparable works ({ratio:.1f}x), "
+        f"both at {config.COST_INDEX_BASE_FY} prices. This is above the range "
+        "those works occupy and needs verification."
     )
     return _finding("C1", points, reason, {
         "value": round(unit_cost, 2),
@@ -389,6 +413,12 @@ def check_c1_cost_outlier(work: dict, peers: PeerGroups, subject: Subject):
         "peer_count": len(values),
         "peer_level": level,
         "unit": work["unit"],
+        # Both figures, so the UI can show constant or nominal prices
+        # without recomputing either.
+        "nominal_value": round(unit_cost * index, 2),
+        "cost_index": index,
+        "index_base_fy": config.COST_INDEX_BASE_FY,
+        "fy": work["fy"],
     })
 
 
@@ -1039,6 +1069,7 @@ _SUBJECT_TABLE = {
     "work": ("works", "work_id"),
     "mp": ("mps", "mp_id"),
     "district": ("districts", "district_id"),
+    "vendor": ("vendors", "vendor_id"),
 }
 
 
@@ -1051,6 +1082,193 @@ def subject_join_sql(subject_type: str, columns: str) -> text:
         JOIN {table} ON {table}.{key} = scores.subject_id
         WHERE scores.subject_type = :subject_type
     """)
+
+
+# ---------------------------------------------------------------------------
+# C8 -- vendor pricing and conduct
+# ---------------------------------------------------------------------------
+
+
+def build_vendor_context(session, works: list[dict],
+                         work_scores: dict[int, int]) -> dict:
+    """Everything C8 needs, aggregated once rather than per vendor.
+
+    work_scores maps work_id -> total_score from the pass that has already
+    run, so the repeat-flag component reuses the scoring already done instead
+    of re-deriving it.
+    """
+    type_costs: dict[str, list[float]] = {}
+    vendor_works: dict[int, list[dict]] = {}
+    bucket_totals: dict[tuple, int] = {}
+    bucket_vendor: dict[tuple, int] = {}
+
+    for work in works:
+        unit_cost = _unit_cost(work)
+        if unit_cost is not None:
+            type_costs.setdefault(work["work_type"], []).append(unit_cost)
+        if work["vendor_id"] is None:
+            continue
+        vendor_works.setdefault(work["vendor_id"], []).append(work)
+        key = (work["district_id"], work["work_type"])
+        bucket_totals[key] = bucket_totals.get(key, 0) + 1
+        bucket_vendor[(*key, work["vendor_id"])] = (
+            bucket_vendor.get((*key, work["vendor_id"]), 0) + 1)
+
+    # Type medians are computed once, after every cost is in.
+    type_median = {
+        work_type: statistics.median(costs)
+        for work_type, costs in sorted(type_costs.items()) if costs
+    }
+
+    # A vendor's price ratio pools all their works against their own type's
+    # median. Pooling rather than taking the worst single work_type is what
+    # separates a consistently expensive contractor from one that happened to
+    # win a hard job.
+    vendor_ratio: dict[int, list[float]] = {}
+    for work in works:
+        if work["vendor_id"] is None:
+            continue
+        unit_cost = _unit_cost(work)
+        median = type_median.get(work["work_type"])
+        if unit_cost is None or not median:
+            continue
+        vendor_ratio.setdefault(work["vendor_id"], []).append(unit_cost / median)
+
+    district_payments: dict[int, int] = {}
+    vendor_payments: dict[tuple, int] = {}
+    for row in session.execute(text("""
+        SELECT works.district_id AS district_id,
+               payments.vendor_id AS vendor_id,
+               SUM(payments.amount) AS paid
+        FROM payments
+        JOIN works ON works.work_id = payments.work_id
+        WHERE payments.vendor_id IS NOT NULL
+        GROUP BY works.district_id, payments.vendor_id
+        ORDER BY works.district_id, payments.vendor_id
+    """)).mappings().all():
+        district_payments[row["district_id"]] = (
+            district_payments.get(row["district_id"], 0) + row["paid"])
+        vendor_payments[(row["district_id"], row["vendor_id"])] = row["paid"]
+
+    return {
+        "vendor_works": vendor_works,
+        "vendor_ratio": vendor_ratio,
+        "bucket_totals": bucket_totals,
+        "bucket_vendor": bucket_vendor,
+        "district_payments": district_payments,
+        "vendor_payments": vendor_payments,
+        "work_scores": work_scores,
+    }
+
+
+def check_c8_vendor(vendor_row: dict, ctx: dict, subject: Subject):
+    """Pricing and conduct signals for one contractor.
+
+    Four components, summed then capped -- the C7 pattern. No single one is
+    conclusive: a vendor may hold most of a small district's work simply
+    because few firms bid there. Together they describe a procurement
+    relationship worth looking at.
+
+    Scored against the vendor rather than their works, for the same reason
+    the MP quota check is scored against the MP: charging it to each job
+    would flag every contract that vendor ever won.
+    """
+    vendor_id = vendor_row["vendor_id"]
+    works = ctx["vendor_works"].get(vendor_id, [])
+    if not works:
+        subject.skip("C8", "This contractor has no works recorded against "
+                           "them, so there is nothing to compare.")
+        return None
+
+    total = 0
+    parts = []
+    evidence = {"work_count": len(works)}
+
+    # 1. Prices above peers.
+    ratios = ctx["vendor_ratio"].get(vendor_id, [])
+    if len(ratios) >= config.C8_MIN_WORKS_FOR_PRICE:
+        ratio = statistics.median(ratios)
+        evidence["price_ratio"] = round(ratio, 3)
+        evidence["priced_works"] = len(ratios)
+        if ratio >= config.C8_PRICE_RATIO_THRESHOLD:
+            total += config.C8_PRICE_POINTS
+            parts.append(
+                f"their works cost {ratio:.1f}x the median for the same work "
+                f"types across {len(ratios)} jobs")
+    else:
+        subject.skip("C8", f"Fewer than {config.C8_MIN_WORKS_FOR_PRICE} priced "
+                           "works, so a median price would not be meaningful.")
+
+    # 2. Concentration within a district and work type.
+    best_share = 0.0
+    best_key = None
+    for (district_id, work_type, vid), count in sorted(
+            ctx["bucket_vendor"].items()):
+        if vid != vendor_id:
+            continue
+        bucket = ctx["bucket_totals"].get((district_id, work_type), 0)
+        if bucket < config.C8_MIN_WORKS_FOR_CONCENTRATION:
+            continue
+        share = count / bucket
+        if share > best_share:
+            best_share, best_key = share, (district_id, work_type, count, bucket)
+    if best_key:
+        evidence["concentration"] = round(best_share, 3)
+        evidence["concentration_bucket"] = {
+            "district_id": best_key[0], "work_type": best_key[1],
+            "vendor_works": best_key[2], "bucket_works": best_key[3]}
+        if best_share >= config.C8_CONCENTRATION_THRESHOLD:
+            total += config.C8_CONCENTRATION_POINTS
+            parts.append(
+                f"they hold {best_share * 100:.0f}% of {best_key[1]} works in "
+                f"district {best_key[0]} ({best_key[2]} of {best_key[3]})")
+
+    # 3. Works already on the worklist.
+    if len(works) >= config.C8_MIN_WORKS_FOR_FLAG_RATE:
+        flagged = sum(1 for w in works
+                      if ctx["work_scores"].get(w["work_id"], 0)
+                      >= config.ALERT_MIN_SCORE)
+        share = flagged / len(works)
+        evidence["flagged_works"] = flagged
+        evidence["flagged_share"] = round(share, 3)
+        if share >= config.C8_FLAGGED_SHARE_THRESHOLD:
+            total += config.C8_FLAGGED_SHARE_POINTS
+            parts.append(
+                f"{flagged} of their {len(works)} works are already flagged "
+                "for verification")
+
+    # 4. Share of a district's money.
+    district_id = vendor_row["district_id"]
+    district_total = ctx["district_payments"].get(district_id, 0)
+    paid = ctx["vendor_payments"].get((district_id, vendor_id), 0)
+    if district_total >= config.C8_MIN_DISTRICT_PAYMENT and paid:
+        share = paid / district_total
+        evidence["payment_share"] = round(share, 3)
+        evidence["paid"] = paid
+        evidence["district_payments"] = district_total
+        if share >= config.C8_PAYMENT_SHARE_THRESHOLD:
+            total += config.C8_PAYMENT_SHARE_POINTS
+            parts.append(
+                f"they received {share * 100:.0f}% of all payments in the "
+                f"district ({_rupees(paid)})")
+
+    if total <= 0:
+        return None
+
+    evidence["raw_points"] = total
+    points = min(total, config.C8_MAX_POINTS)
+    reason = (f"{vendor_row['name']} stands out on procurement: "
+              + "; ".join(parts)
+              + ". Worth reviewing how these contracts were awarded and "
+                "priced.")
+    return _finding("C8", points, reason, evidence)
+
+
+def score_vendor(vendor_row: dict, ctx: dict) -> Score:
+    subject = Subject("vendor", vendor_row["vendor_id"])
+    subject.record("C8", _guarded(subject, "C8", check_c8_vendor,
+                                  vendor_row, ctx, subject))
+    return subject.to_score()
 
 
 # ---------------------------------------------------------------------------
@@ -1098,6 +1316,19 @@ def run_checks(session) -> dict:
             if totals and totals["total"] else None
         )
         scores.append(score_district(district))
+
+    # Vendors are scored last, because C8 reuses the work scores computed
+    # above rather than re-deriving which contracts are already flagged.
+    work_scores = {
+        score.subject_id: score.total_score
+        for score in scores if score.subject_type == "work"
+    }
+    vendor_ctx = build_vendor_context(session, works, work_scores)
+    for row in session.execute(text(
+        """SELECT vendor_id, name, district_id FROM vendors
+           ORDER BY vendor_id"""
+    )).mappings().all():
+        scores.append(score_vendor(dict(row), vendor_ctx))
 
     # Alerts reference scores, so they go first -- the FK pragma is live.
     session.execute(text("DELETE FROM alerts"))

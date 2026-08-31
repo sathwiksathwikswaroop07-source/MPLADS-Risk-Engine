@@ -407,9 +407,9 @@ class Score(Base):
     score_id = Column(Integer, primary_key=True)
     subject_type = Column(String, nullable=False)
     # Deliberately NOT a ForeignKey: the target table is polymorphic
-    # (work / mp / district). Never join on this without first filtering
-    # subject_type -- a district score with subject_id = 3 would otherwise
-    # silently match work_id = 3. Do not "fix" this.
+    # (work / mp / district / vendor). Never join on this without first
+    # filtering subject_type -- a district score with subject_id = 3 would
+    # otherwise silently match work_id = 3. Do not "fix" this.
     subject_id = Column(Integer, nullable=False)
     total_score = Column(Integer, nullable=False)
     cost_points = Column(Integer, nullable=False, default=0)          # C1
@@ -428,7 +428,9 @@ class Score(Base):
 
     __table_args__ = (
         UniqueConstraint("subject_type", "subject_id"),
-        CheckConstraint("subject_type IN ('work','mp','district')"),
+        CheckConstraint(
+            "subject_type IN ('work','mp','district','vendor')"
+        ),
         CheckConstraint("total_score BETWEEN 0 AND 100"),
         CheckConstraint("cost_points >= 0"),
         CheckConstraint("delay_points >= 0"),

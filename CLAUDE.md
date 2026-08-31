@@ -253,6 +253,13 @@ guarantees they disagree.
 | 26 | is_st_area | 0/1 |
 | 27 | planted_anomaly | ground truth, NULL for clean rows |
 
+**Costs are compared in constant prices.** `checks.py` deflates every
+unit cost by `COST_INDEX[fy]` before comparing peers, because the peer
+ladder has no year dimension and a recent work would otherwise look
+expensive purely for being recent. The index is a published economic
+fact — a deployment reads the WPI construction series — which is why
+`checks.py` may read it where it may never read `BASE_UNIT_COST`.
+
 **Cost convention:** always `COALESCE(final_cost, estimated_cost)`.
 Never `final_cost` alone — it is NULL for every unfinished work, which
 would silently exclude exactly the works most likely to be problems.
@@ -367,6 +374,7 @@ matters more now that there is no session table to cross-reference.
 
 `users.scope_id`, `scores.subject_id` and `audit_log.subject_id` are
 **deliberately not ForeignKeys** — their target table varies by row.
+`scores.subject_type` is one of work / mp / district / **vendor**.
 
 **Never join on `subject_id` without first filtering `subject_type`.**
 This fails silently rather than erroring:
@@ -484,6 +492,7 @@ Follows `scores.subject_type`:
 | work | District Officer's worklist |
 | mp (quota shortfall) | **State Officer's** worklist |
 | district (utilisation) | **State Officer's** worklist |
+| vendor (pricing conduct) | District Officer's worklist |
 
 Never send an alert about someone only to that same person. A district
 officer must not be the sole recipient of an alert saying his own
@@ -539,6 +548,18 @@ it an early warning. Enforce this in `checks.py` with an explicit
 | Check | Max | Rule |
 |---|---|---|
 | **C4 utilisation** | 15 | `spent / released` behind where the calendar says it should be → 10. Over 60% of the year's spend in Jan–Mar → 8. Stack, cap 15. |
+
+### Vendor-level — `subject_type = 'vendor'`
+
+| Check | Max | Rule |
+|---|---|---|
+| **C8 vendor conduct** | 30 | Median unit cost ≥ 1.6× the work_type median over ≥ 4 works → 16. ≥ 60% of a district's works of one type → 8. ≥ 40% of their works already flagged → 10. ≥ 45% of a district's payments → 8. Sum, capped. |
+
+Scored against the **vendor**, never against their works — charging it
+per-work would flag every contract that vendor ever won, exactly as
+awarding an MP's quota shortfall per-work would. No single component
+reaches the alert threshold on its own: a vendor may hold most of a
+small district's work simply because few firms bid there.
 
 Measure utilisation **against the calendar**, not raw unspent balance.
 Under the single-annual-release model funds sit in a nodal account and

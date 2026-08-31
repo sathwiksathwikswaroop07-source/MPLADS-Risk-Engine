@@ -494,18 +494,25 @@ def _pick_area_type(rng, district):
     return _weighted_choice(rng, neighbours)
 
 
-def _unit_cost(rng, work_type, terrain, area_type, sigma=None):
-    """Baseline cost per unit, with lognormal noise.
+def _unit_cost(rng, work_type, terrain, area_type, fy, sigma=None):
+    """Baseline cost per unit, escalated to `fy`, with lognormal noise.
 
     The baseline tables live in config.py, never inline here -- evaluate.py
     needs to know what "normal" was in order to plant a work at 4x normal.
     checks.py must never read them: detection compares a work against its
     actual peers, not against a constant we chose.
+
+    The COST_INDEX multiplier is applied here rather than later so that every
+    downstream consumer -- planted anomalies and the C5 de-collision sweep
+    included -- works in the same escalated money. De-colliding pre-inflation
+    costs and then inflating them would reintroduce the collisions the sweep
+    had just removed.
     """
     base = (
         config.BASE_UNIT_COST[work_type]
         * config.AREA_COST_MULTIPLIER[area_type]
         * config.TERRAIN_COST_MULTIPLIER[terrain]
+        * config.COST_INDEX[fy]
     )
     noise = rng.lognormvariate(0, config.COST_NOISE_SIGMA if sigma is None else sigma)
     return base * noise
@@ -633,7 +640,7 @@ def build_works(session, rng, fake, districts, constituencies, mps, agencies,
             rng, recommended_on, work_type, area_type)
 
         estimated_cost = int(round(
-            _unit_cost(rng, work_type, terrain, area_type) * quantity))
+            _unit_cost(rng, work_type, terrain, area_type, fy) * quantity))
         if status == "completed":
             # Small honest variation between estimate and final bill.
             final_cost = int(round(estimated_cost * rng.uniform(0.96, 1.08)))
@@ -691,6 +698,23 @@ def _cost_of(work):
     return work.final_cost if work.final_cost is not None else work.estimated_cost
 
 
+def _real_unit_cost_of(nominal_cost, work):
+    """Constant-price unit cost for a candidate nominal cost."""
+    return nominal_cost / work.quantity / config.COST_INDEX[work.fy]
+
+
+def _real_unit_cost(work):
+    """Unit cost in constant base-year prices -- what C5 actually compares.
+
+    The de-collision sweep has to work in the same currency the check does.
+    Comparing nominal cost here while checks.py deflates would let two works
+    in different financial years sit 18% apart in cash terms, be declared
+    clear, and then land inside the 10% band once both are brought to
+    constant prices. Measured: 87 clean pairs collided that way.
+    """
+    return _cost_of(work) / work.quantity / config.COST_INDEX[work.fy]
+
+
 def decollide_duplicates(works):
     """Break accidental C5 duplicate pairs among clean works.
 
@@ -744,8 +768,8 @@ def decollide_duplicates(works):
                     if gap > config.C5_WINDOW_DAYS:
                         break  # sorted by date, so nothing later can collide
 
-                    unit_a = _cost_of(work) / work.quantity
-                    unit_b = _cost_of(other) / other.quantity
+                    unit_a = _real_unit_cost(work)
+                    unit_b = _real_unit_cost(other)
                     if min(unit_a, unit_b) <= 0:
                         continue
                     if abs(unit_a - unit_b) / min(unit_a, unit_b) >= tolerance:
@@ -778,15 +802,19 @@ def decollide_duplicates(works):
                                     - date.fromisoformat(other.sanctioned_on)).days)
                         if span > config.C5_WINDOW_DAYS:
                             continue
-                        unit = _cost_of(candidate) / candidate.quantity
+                        unit = _real_unit_cost(candidate)
                         if unit > 0:
                             neighbours.append(unit)
 
                     target = min(neighbours) if neighbours else unit_a
                     step = factor
                     while True:
-                        new_cost = max(1, int(round(target / step * other.quantity)))
-                        settled = new_cost / other.quantity
+                        # target is in constant prices; the column stores
+                        # nominal money, so re-inflate before writing.
+                        new_cost = max(1, int(round(
+                            target / step * other.quantity
+                            * config.COST_INDEX[other.fy])))
+                        settled = _real_unit_cost_of(new_cost, other)
                         # Rounding to whole rupees over a small quantity can
                         # pull the result back inside a band, so confirm it
                         # cleared all of them before accepting it.
@@ -966,6 +994,52 @@ def plant_anomalies(session, rng, works, mps, districts, agencies, vendors):
 
     session.flush()
     return works
+
+
+# ---------------------------------------------------------------------------
+# Phase 6b -- vendor overpricing
+# ---------------------------------------------------------------------------
+
+
+def plant_vendor_overpricing(session, rng, works, vendors):
+    """Make a few vendors price consistently above their peers.
+
+    Returns the chosen vendor_ids -- the label lives on the VENDOR, not on
+    each work. Marking every one of their works would credit C1 with catching
+    something C8 exists to catch, and would inflate C1's recall for a
+    procurement pattern no single work demonstrates.
+
+    Their works will also trip C1 individually, which is correct: the same
+    fact is legitimately visible at two levels. evaluate.py must count them
+    against the vendor label.
+
+    Only clean works are repriced, so a vendor's inflation never overwrites
+    an existing anomaly and the per-label counts stay exact.
+    """
+    by_vendor = {}
+    for work in works:
+        if work.vendor_id is None or work.planted_anomaly is not None:
+            continue
+        by_vendor.setdefault(work.vendor_id, []).append(work)
+
+    # Enough works to make a median meaningful, or the check cannot see it.
+    eligible = sorted(
+        vid for vid, rows in by_vendor.items()
+        if len(rows) >= config.C8_MIN_WORKS_FOR_PRICE * 2
+    )
+    chosen = rng.sample(eligible, min(config.PLANTED_VENDOR_OVERPRICING,
+                                      len(eligible)))
+
+    low, high = config.VENDOR_OVERPRICING_MULTIPLE_RANGE
+    for vendor_id in sorted(chosen):
+        for work in sorted(by_vendor[vendor_id], key=lambda w: w.work_id):
+            multiple = rng.uniform(low, high)
+            work.estimated_cost = int(round(work.estimated_cost * multiple))
+            if work.final_cost is not None:
+                work.final_cost = int(round(work.final_cost * multiple))
+
+    session.flush()
+    return sorted(chosen)
 
 
 # ---------------------------------------------------------------------------
@@ -1195,6 +1269,12 @@ def generate() -> dict:
         works = plant_anomalies(session, rng, works, mps, districts,
                                 agencies, vendors)
 
+        # Before the de-collision sweep, so repriced works are de-collided
+        # like any other. These works stay unlabelled -- the anomaly belongs
+        # to the vendor, not to any one job.
+        overpriced_vendors = plant_vendor_overpricing(
+            session, rng, works, vendors)
+
         # Again, because planting rewrites costs and sanction dates
         # (cost_overrun, long_delay, impossible_date) and so creates fresh
         # collisions among clean works. This pass skips planted works
@@ -1243,6 +1323,7 @@ def generate() -> dict:
             "complaints": len(complaints),
             "planted": planted,
             "decollided": nudged,
+            "overpriced_vendors": len(overpriced_vendors),
             "sparse": len(sparse),
             "quota_shortfall_mps": len(shortfall_mps),
         }
@@ -1273,6 +1354,9 @@ def main() -> None:
         total += found
     print(f"    {'quota_shortfall (MPs)':24} {counts['quota_shortfall_mps']:>4}")
     print(f"    {'total work-level':24} {total:>4}")
+
+    print(f"    {'vendor_overpricing (vendors)':24} "
+          f"{counts['overpriced_vendors']:>4}")
 
     print(f"\n  C5 collisions removed from clean rows: {counts['decollided']}")
     print(f"  Sparse works (no progress history):    {counts['sparse']}")

@@ -153,6 +153,7 @@ C6_MAX_POINTS = 15      # citizen reports          (work)
 C7_MAX_POINTS = 35      # paid, no proof of work   (work)
 C3_MP_MAX_POINTS = 25   # quota compliance         (mp)
 C4_MAX_POINTS = 15      # utilisation              (district)
+C8_MAX_POINTS = 30      # vendor pricing conduct   (vendor)
 
 MAX_TOTAL_SCORE = 100
 
@@ -288,6 +289,54 @@ C4_BEHIND_CALENDAR_POINTS = 10
 # than because work was done.
 C4_Q4_SPEND_CEILING = 0.60
 C4_Q4_BUNCHING_POINTS = 8
+
+
+# ---------------------------------------------------------------------------
+# C8 - vendor pricing and conduct
+# ---------------------------------------------------------------------------
+
+# Scored against the vendor, not their works. A contractor whose prices sit
+# consistently above their peers is a procurement question; charging it to
+# each individual work would flag every job that vendor ever won.
+#
+# Every threshold below sits ABOVE the spread measured on clean generated
+# data, so the component identifies an outlier rather than the middle of the
+# distribution:
+#
+#   price ratio (vendor median / work_type median)  clean p95 1.48, p99 1.59
+#   concentration (share of a district+work_type)   clean p95 0.42, p99 0.50
+#
+# At these values the price component fires on 2 of 290 clean vendor+type
+# pairs (0.7%) and concentration on 6 of 1478 eligible buckets (0.4%).
+
+# A vendor needs this many works of a type before their median means
+# anything -- a median of two is not a price.
+C8_MIN_WORKS_FOR_PRICE = 4
+C8_PRICE_RATIO_THRESHOLD = 1.60
+# The heaviest component, and deliberately so: a contractor whose median
+# price sits 1.6x above their peers across several jobs is the clearest
+# procurement signal here. Weighted so that price plus one corroborating
+# component clears ALERT_MIN_SCORE -- at 14 the strongest realistic pairing
+# (overpriced, and works already flagged) summed to 24 and stayed silent one
+# point below the threshold.
+C8_PRICE_POINTS = 16
+
+# Share of one district's works of one type. The floor matters more than the
+# share: without it a two-work bucket reads 100% concentration on noise.
+C8_MIN_WORKS_FOR_CONCENTRATION = 6
+C8_CONCENTRATION_THRESHOLD = 0.60
+C8_CONCENTRATION_POINTS = 8
+
+# A vendor whose works keep turning up on the worklist. Reuses the scores
+# already computed rather than re-deriving anything.
+C8_MIN_WORKS_FOR_FLAG_RATE = 4
+C8_FLAGGED_SHARE_THRESHOLD = 0.40
+C8_FLAGGED_SHARE_POINTS = 10
+
+# Share of a district's total payments reaching one vendor.
+C8_MIN_DISTRICT_PAYMENT = 10_000_000   # ignore trivially small districts
+C8_PAYMENT_SHARE_THRESHOLD = 0.45
+C8_PAYMENT_SHARE_POINTS = 8
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +484,53 @@ COST_NOISE_SIGMA = 0.28
 # Financial years the dataset spans. Straddles SINGLE_INSTALMENT_FROM so both
 # release models are exercised.
 FISCAL_YEARS = ("2022-23", "2023-24", "2024-25", "2025-26")
+
+
+# --- The cost index -------------------------------------------------------
+#
+# Construction costs rise year on year. Without this the dataset is flat in
+# nominal terms, which is not what any real cost series looks like, and it
+# hides a real detection problem: C1's peer ladder has no year dimension, so
+# a 2024-25 work is compared against 2022-23 peers at face value and looks
+# expensive purely for being recent.
+#
+# READ BY BOTH generate_data.py (to inflate) AND checks.py (to deflate back
+# to constant prices before comparing peers).
+#
+# That dual use is a deliberate, narrow exception to the rule that checks.py
+# must not read the generator's cost tables, and the distinction is real:
+#
+#   BASE_UNIT_COST is OUR INVENTED ANSWER. Scoring against it would be
+#   marking our own homework -- the recall number would measure how well we
+#   reproduced our own baseline.
+#
+#   COST_INDEX is a PUBLISHED ECONOMIC FACT. A real deployment would take
+#   these figures from the WPI construction series rather than from us. An
+#   officer deflating two years to constant prices before comparing them is
+#   doing ordinary analysis, not consulting the answer key.
+#
+# Base year 2022-23 = 1.00; the index is what a work's money is worth
+# relative to that year.
+ANNUAL_COST_ESCALATION = 0.06
+COST_INDEX_BASE_FY = "2022-23"
+COST_INDEX = {
+    "2022-23": 1.0000,
+    "2023-24": 1.0600,
+    "2024-25": 1.1236,
+    "2025-26": 1.1910,
+}
+
+
+# --- Vendor overpricing ---------------------------------------------------
+
+# Vendors whose works are priced well above their peers. Labelled on the
+# VENDOR, never on each work: marking every work would credit C1 with
+# catching something C8 is meant to catch, and inflate C1's recall.
+#
+# Clean vendor price ratios reach 1.80 at the very top, so a planted vendor
+# has to sit clearly above that to be separable at all.
+PLANTED_VENDOR_OVERPRICING = 6
+VENDOR_OVERPRICING_MULTIPLE_RANGE = (2.0, 2.6)
 
 
 # --- How each anomaly is planted ------------------------------------------
