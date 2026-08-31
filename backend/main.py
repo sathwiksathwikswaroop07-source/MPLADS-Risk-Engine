@@ -23,6 +23,7 @@ officer read someone else's district by editing a URL.
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
@@ -37,10 +38,30 @@ from backend.db import get_db
 
 REF = config.REFERENCE_DATE
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Refuse to serve without a usable signing secret.
+
+    auth._secret() is deliberately read at call time, which means a server
+    started without JWT_SECRET boots cleanly, answers /health with a 200 and
+    then returns 500 on the first login. During a demo that reads as "the app
+    is broken" rather than "an environment variable is missing", and the
+    traceback only appears in the server log.
+
+    Validating once at startup turns a confusing runtime 500 into a refusal to
+    start, naming the command that fixes it. This only reads the secret; it is
+    never logged.
+    """
+    auth._secret()
+    yield
+
+
 app = FastAPI(
     title="MPLADS Risk Engine",
     description="Anomaly detection and monitoring for MPLADS works.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # The React dev server. A deployment would narrow this to its own origin.

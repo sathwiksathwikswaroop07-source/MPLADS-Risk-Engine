@@ -46,6 +46,11 @@ cd frontend && npm run dev          # port 5173
 `generate_data.py` drops and recreates everything. Always safe to
 re-run. `checks.py` rebuilds `scores` and `alerts` only.
 
+**`JWT_SECRET` is per-shell.** A new terminal does not have it, and the
+demo password is `mplads2026`. The app refuses to start without the
+secret rather than failing later on the first login, so if `uvicorn`
+exits with `JWT_SECRET is not set`, re-run the `export` line above.
+
 ---
 
 ## Stack
