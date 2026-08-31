@@ -1,0 +1,146 @@
+/* The only file in the project allowed to contain a colour literal.
+   Components reference var(--token) exclusively. */
+
+:root {
+  color-scheme: light;
+
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --border: #dfe3e8;
+
+  --text: #1a1f26;
+  --text-muted: #5c6672;
+  --text-faint: #8b95a1;
+
+  --accent: #1f5fa8;
+  --accent-soft: #e6eef8;
+
+  /* Severity bands mirror config.SEVERITY_BANDS: 70 / 45 / 25. */
+  --sev-critical: #8c1d18;
+  --sev-critical-bg: #fbe9e7;
+  --sev-high: #a3480a;
+  --sev-high-bg: #fdeee0;
+  --sev-medium: #7a5c00;
+  --sev-medium-bg: #fbf3d9;
+
+  --ok: #1c6b45;
+  --ok-bg: #e4f3ea;
+
+  --radius: 8px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 12px rgba(16, 24, 40, 0.05);
+}
+
+/* Dark under both the system preference and an explicit override, so a
+   future theme toggle needs no further CSS. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --bg: #14171c;
+    --surface: #1c2027;
+    --surface-2: #242932;
+    --border: #333a45;
+
+    --text: #e8ebef;
+    --text-muted: #a3adba;
+    --text-faint: #737e8c;
+
+    --accent: #6fa8e8;
+    --accent-soft: #1e2c3e;
+
+    --sev-critical: #f2b8b5;
+    --sev-critical-bg: #3b1512;
+    --sev-high: #f5c396;
+    --sev-high-bg: #3a2312;
+    --sev-medium: #e8d48a;
+    --sev-medium-bg: #332c0f;
+
+    --ok: #8fd6ae;
+    --ok-bg: #12301f;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.25);
+  }
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #14171c;
+  --surface: #1c2027;
+  --surface-2: #242932;
+  --border: #333a45;
+
+  --text: #e8ebef;
+  --text-muted: #a3adba;
+  --text-faint: #737e8c;
+
+  --accent: #6fa8e8;
+  --accent-soft: #1e2c3e;
+
+  --sev-critical: #f2b8b5;
+  --sev-critical-bg: #3b1512;
+  --sev-high: #f5c396;
+  --sev-high-bg: #3a2312;
+  --sev-medium: #e8d48a;
+  --sev-medium-bg: #332c0f;
+
+  --ok: #8fd6ae;
+  --ok-bg: #12301f;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        Helvetica, Arial, sans-serif;
+}
+
+a { color: var(--accent); }
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 7px 13px;
+}
+button:hover:not(:disabled) { background: var(--surface-2); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface);
+}
+button.primary:hover:not(:disabled) { opacity: 0.9; background: var(--accent); }
+
+input, select, textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px 9px;
+}
+
+table { border-collapse: collapse; width: 100%; }
+th, td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
