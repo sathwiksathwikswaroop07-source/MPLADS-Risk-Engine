@@ -18,6 +18,20 @@ here, in full, including tables that stay empty until later steps.
 **This spec supersedes the "Database schema" section of CLAUDE.md.**
 Updating CLAUDE.md to match is part of this step's Definition of Done.
 
+> **Amended by `01b-work-type-granularity.md`.** Three things below are
+> now out of date, and 01b is the authority on them:
+>
+> - `works` has **28** columns, not 27 — `specification` at 27,
+>   `planted_anomaly` at 28. `area_type` (11) and
+>   `expected_completion_on` (18) are unchanged.
+> - `work_type` has **15** values, not 8 (roads split by lane, bridges
+>   by span class, hospitals by tier, and so on).
+> - `unit` allows **`m`** as well as km / count / sqm / beds; bridges
+>   are measured in metres.
+>
+> Everything else here still stands. Read 01b for the reasoning — it is
+> kept separate rather than merged so the *why* survives.
+
 ### Decisions carried into this revision
 
 Four things changed since the previous draft. Each is a deliberate call,
@@ -721,7 +735,7 @@ sole recipient of an alert saying his own district is underspending.
   the scoring section; correct the fund-release note from two
   instalments of ₹2.5 crore to a single annual instalment of ₹5 crore
   from 1 April 2023; tick step 01 once the Definition of Done passes.
-- `.claude/commands/spec_document_creater.md` — its Rules section still says "No ORM.
+- `.claude/commands/spec.md` — its Rules section still says "No ORM.
   Raw `sqlite3` only", which now contradicts this spec and would be
   copied into every future spec it generates. Update it to the
   SQLAlchemy split.
@@ -949,7 +963,7 @@ Step-specific:
 - [ ] CLAUDE.md's schema section matches this spec; its ORM rule says
       SQLAlchemy; it records JWT and the absence of `sessions`; and its
       fund-release note says single annual instalment from 1 April 2023.
-- [ ] `.claude/commands/spec_document_creater.md` no longer says "No ORM. Raw `sqlite3`
+- [ ] `.claude/commands/spec.md` no longer says "No ORM. Raw `sqlite3`
       only."
 - [ ] No recall check applies at this step — there is no data and no
       scoring. The first baseline is established in step 03 and measured
