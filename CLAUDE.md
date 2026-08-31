@@ -91,8 +91,10 @@ mplads/
         ├── theme.css
         ├── api.js
         ├── App.jsx
-        ├── citizen/           ← public portal pages
-        └── officer/           ← officer portal pages
+        ├── Login.jsx          ← one login, redirects by role
+        ├── citizen/           ← citizen portal
+        ├── officer/           ← worklist: district + state officer
+        └── oversight/         ← read-only: mp + ministry
 ```
 
 ---
@@ -104,7 +106,7 @@ Mark a step complete only when its Definition of Done passes.
 | Step | Feature | Status |
 |---|---|---|
 | 01 | Project skeleton, config, database schema | ☐ |
-| 02 | Dummy data generator with planted anomalies | ☑ |
+| 02 | Dummy data generator with planted anomalies | ☐ |
 | 03 | Detection checks and scoring | ☐ |
 | 04 | API endpoints — two routers | ☐ |
 | 05 | JWT login and scope enforcement | ☐ |
@@ -640,23 +642,74 @@ the **same `mplads.db`** — never two databases. Separate routers make
 the citizen restriction structural: the citizen router has no code path
 that selects `total_score`, so it cannot leak one.
 
-### What each role sees
+### Three portals, not five
 
-Each role's view is a **different shape**, not one screen filtered.
-Building one worklist and relabelling it four times is visible to anyone
-looking closely.
+Five roles, but only **three home screens**. Group by *what a role can
+do*, never by seniority — two roles with identical permissions share a
+page, and two roles that differ on whether action buttons exist must
+not.
 
-- **Citizen** — works in their constituency with dates, cost,
-  contractor, photos, map pin, and an overdue flag; a complaint button.
-- **MP** — constituency works, plus an SC/ST quota meter against the 15%
-  and 7.5% floors, unspent balance, stalled works. Framed as assistance,
+| Portal | Roles | Why together |
+|---|---|---|
+| **Citizen** `/citizen` | citizen | Never sees a score |
+| **Worklist** `/officer` | district_officer, state_officer | **Identical permissions** — only scope differs, and scope comes from the token |
+| **Oversight** `/oversight` | mp, ministry | See scores, cannot act on anything |
+
+District and State Officer match on every row of the permission matrix
+above. The state officer's extra content — MP-quota and
+district-utilisation alerts — is not a different page, it is the same
+worklist holding more subject types, which `SUBJECT_ROUTING` already
+produces. So the State Officer view costs almost nothing on top of the
+District Officer view.
+
+Within Oversight the shell is shared and the widgets differ by scope:
+
+- **MP** — constituency works, SC/ST quota meter against the 15% and
+  7.5% floors, unspent balance, stalled works. Framed as assistance,
   not audit.
-- **District Officer** — the ranked worklist, alert detail with evidence
-  pack, and the act buttons. **This is the primary screen.**
-- **State Officer** — district comparison, plus the MP-quota and
-  district-utilisation alerts routed to them.
-- **Ministry** — league tables and trend over time. They do not read
-  individual works.
+- **Ministry** — national league tables and trend over time. They do not
+  read individual works.
+
+Neither renders an action button anywhere.
+
+### Three portals, two routers
+
+Page count and router count are **different questions.** Do not add a
+third router to match the third portal.
+
+`/citizen/*` is a separate router because the guarantee *"this router
+cannot leak a risk score"* must be provable by the **absence of code** —
+no code path selects `total_score`, so a leak requires someone to add
+the field deliberately. MPs and Ministry users legitimately see scores,
+so there is no such guarantee to protect for them; their restriction is
+on **writes**, and `require_role(*ALERT_ACTOR_ROLES)` on the four action
+endpoints enforces it with a 403. A third router would add files without
+adding safety.
+
+### One login, redirect by role
+
+One login page, one `/auth/login` endpoint. The role dropdown remains a
+**filter, not a claim**. On success the frontend reads `user.role` from
+the response and redirects:
+
+```js
+const PORTAL = {
+  citizen:          "/citizen",
+  district_officer: "/officer",
+  state_officer:    "/officer",
+  mp:               "/oversight",
+  ministry:         "/oversight",
+};
+```
+
+Three login endpoints would mean getting the timing-attack fix, the
+lockout counter and the audit write right in three places instead of
+one.
+
+**That map is convenience, not security.** A route guard bounces an MP
+who deep-links `/officer` so they do not see a broken page — but the
+enforcement is that every API call still returns 403. Never let a
+frontend redirect be the reason data is safe.
 
 ### Citizens see facts, not scores
 
@@ -783,6 +836,8 @@ step is not done.
 | Reading `planted_anomaly` in checks | Accuracy number becomes fake; a judge can catch it |
 | Terrain on the district, not the work | A flat road in a hill district gets excused |
 | Filtering scope in the frontend | Data already left the server |
+| A third router to match the third portal | Files without safety — the router split protects score exposure, not page count |
+| Grouping portals by seniority | Puts an actor (state officer) beside watchers; action buttons appear where they must not |
 | Bare score in the UI | Kills the explainability the project rests on |
 | "Scam" on screen | A hilly road legitimately costs more |
 | Letting C2 and C2b both fire | One delay charged twice in `delay_points` |
