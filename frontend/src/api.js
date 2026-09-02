@@ -1,6 +1,11 @@
 // Every network call in the application lives here. No component calls fetch.
 
-const BASE = "/api";
+// In dev this stays "/api" and Vite proxies it to the local backend, so no
+// CORS is involved. A deployment sets VITE_API_BASE to the backend's public
+// URL at BUILD time -- Vite inlines it, so it must be set on the static
+// site's build environment, not at runtime. Trailing slash trimmed: the
+// paths below all start with one and "//auth/login" would 404.
+const BASE = (import.meta.env.VITE_API_BASE ?? "/api").replace(/\/+$/, "");
 const TOKEN_KEY = "mplads_token";
 const USER_KEY = "mplads_user";
 

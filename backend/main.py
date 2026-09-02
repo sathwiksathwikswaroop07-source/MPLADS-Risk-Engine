@@ -64,10 +64,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# The React dev server. A deployment would narrow this to its own origin.
+# The React dev server, plus whatever origins a deployment adds. Data that
+# reached the browser has already left the server, so this list is a
+# convenience for the browser -- never the access control. Scope enforcement
+# lives in the token and the shared dependency.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=config.cors_allow_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

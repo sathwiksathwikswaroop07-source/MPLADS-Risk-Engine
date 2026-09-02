@@ -665,6 +665,40 @@ def load_env_file(path: Path = ENV_FILE) -> None:
 
 load_env_file()
 
+# ---------------------------------------------------------------------------
+# CORS origins
+# ---------------------------------------------------------------------------
+
+# The Vite dev server, always allowed so a fresh clone runs with no config.
+DEV_ORIGINS = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+)
+
+# A deployment adds its own frontend origin here, comma-separated:
+#   CORS_ORIGINS=https://kavach-web.onrender.com
+# Kept in the environment rather than the source so the backend does not need
+# a code change (and a redeploy) when the frontend URL changes.
+CORS_ORIGINS_ENV_VAR = "CORS_ORIGINS"
+
+
+def cors_allow_origins() -> list[str]:
+    """Dev origins plus any set in CORS_ORIGINS, de-duplicated in order.
+
+    A trailing slash is stripped: browsers send the Origin header without one,
+    so "https://site.com/" in the variable would silently never match and the
+    failure would look like a CORS bug rather than a typo.
+    """
+    origins = list(DEV_ORIGINS)
+    for raw in os.environ.get(CORS_ORIGINS_ENV_VAR, "").split(","):
+        origin = raw.strip().rstrip("/")
+        if origin and origin not in origins:
+            origins.append(origin)
+    return origins
+
+
 # Roles that may act on alerts. MPs and the Ministry are view-only: under
 # the scheme an MP recommends works while the District Authority sanctions,
 # executes and verifies them, so letting an MP close an alert on their own

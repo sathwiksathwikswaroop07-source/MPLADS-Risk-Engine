@@ -1,0 +1,49 @@
+# Render blueprint: the API and the React app are two separate services that
+# share one repository. Committed so the settings are reviewable rather than
+# living only in a dashboard nobody else can see.
+services:
+  # ---------------------------------------------------------------------
+  # FastAPI backend
+  # ---------------------------------------------------------------------
+  - type: web
+    name: kavach-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # --host 0.0.0.0 is mandatory: bound to localhost the container is
+    # unreachable, Render's health check fails and the service restarts in a
+    # loop. $PORT is assigned by Render and must not be hardcoded.
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: JWT_SECRET
+        # Generated once by Render and kept; never committed.
+        generateValue: true
+      - key: CORS_ORIGINS
+        # The frontend's own origin, so the browser will let it call this API.
+        # Set by hand because Render's `property: host` returns a bare
+        # hostname and an Origin must carry its scheme. Update if renamed.
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+
+  # ---------------------------------------------------------------------
+  # React frontend (static)
+  # ---------------------------------------------------------------------
+  - type: web
+    name: kavach-web
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      # Inlined at BUILD time by Vite, so a change here needs a rebuild.
+      - key: VITE_API_BASE
+        # Full https:// URL of the API, e.g. https://kavach-api.onrender.com
+        # -- a bare hostname would make fetch() treat it as a relative path.
+        sync: false
+    routes:
+      # Single-page app: every unknown path must serve index.html or a
+      # refresh on /officer/alerts/272 returns 404 from the static host.
+      - type: rewrite
+        source: /*
+        destination: /index.html
