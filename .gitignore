@@ -17,3 +17,6 @@ node_modules/
 mplads.db-shm
 mplads.db-wal
 dist/
+
+# Local dev overrides -- per-machine port config, never shared.
+frontend/vite.config.local.mjs
