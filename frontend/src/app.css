@@ -189,17 +189,10 @@
 .inline-field { display: flex; align-items: center; gap: 8px; }
 .inline-field input { width: 90px; }
 
-/* --- login --- */
-.login-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-.login-card {
-  width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 14px;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 28px; box-shadow: var(--shadow);
-}
-.login-card h1 { margin: 0; font-size: 19px; }
-.login-sub { margin: -8px 0 0; color: var(--text-muted); font-size: 13px; }
-.login-card label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--text-muted); }
-.login-note { margin: 0; font-size: 12px; color: var(--text-faint); }
+/* --- login ---
+   The sign-in screen owns its own layout in login.css; the page and card
+   rules that used to live here were dropped with the plain login form.
+   .login-error stays: the officer ActionBar renders it on app surfaces. */
 .login-error {
   background: var(--sev-critical-bg); color: var(--sev-critical);
   border: 1px solid var(--sev-critical); border-radius: var(--radius);

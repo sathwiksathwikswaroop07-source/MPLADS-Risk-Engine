@@ -50,6 +50,13 @@ function EmblemHero() {
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     if (motionQuery.matches) return undefined;
 
+    // Every caption starts hidden and the opening one is shown explicitly, so
+    // the first paint is a single caption even before a scroll event lands.
+    // Without this the stack renders together for a frame and prints on itself.
+    capRefs.forEach((ref, i) => {
+      if (ref.current) ref.current.style.opacity = i === 0 ? "1" : "0";
+    });
+
     let frame = 0;
 
     const update = () => {
@@ -138,23 +145,25 @@ function EmblemHero() {
             <img className="emblem" ref={emblemRef} src={emblem} alt="State Emblem of India" />
           </div>
 
-          <div className="caption cap-1" ref={capRefs[0]}>
-            <div className="eyebrow">Government of India</div>
-            <div className="head">
-              Members of Parliament
-              <br />
-              Local Area Development Scheme
+          <div className="captions">
+            <div className="caption cap-1" ref={capRefs[0]}>
+              <div className="eyebrow">Government of India</div>
+              <div className="head">
+                Members of Parliament
+                <br />
+                Local Area Development Scheme
+              </div>
             </div>
-          </div>
-          <div className="caption cap-2" ref={capRefs[1]}>
-            <div className="eyebrow" lang="sa">सत्यमेव जयते</div>
-            <div className="head">Truth Alone Triumphs</div>
-            <div className="sub">₹5 crore, every MP, every year — where does it go?</div>
-          </div>
-          <div className="caption cap-3" ref={capRefs[2]}>
-            <div className="eyebrow">SIH26102 · Prototype</div>
-            <div className="head">Anomaly detection for MPLADS</div>
-            <div className="sub">Sign in below ↓</div>
+            <div className="caption cap-2" ref={capRefs[1]}>
+              <div className="eyebrow" lang="sa">सत्यमेव जयते</div>
+              <div className="head">Truth Alone Triumphs</div>
+              <div className="sub">₹5 crore, every MP, every year — where does it go?</div>
+            </div>
+            <div className="caption cap-3" ref={capRefs[2]}>
+              <div className="eyebrow">SIH26102 · Prototype</div>
+              <div className="head">Anomaly detection for MPLADS</div>
+              <div className="sub">Sign in below ↓</div>
+            </div>
           </div>
 
           <div className="scroll-hint" ref={hintRef} aria-hidden="true">
@@ -222,7 +231,7 @@ export default function Login() {
         <div className="login-wrap">
           <div className="login-intro">
             <div className="tag">Restricted access</div>
-            <h1>Sign in to the risk console</h1>
+            <h1>Sign in to KAVACH</h1>
             <p>
               This console ranks MPLADS works, MPs and districts by how far their
               numbers deviate from comparable ones and from scheme rules, so an

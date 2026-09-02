@@ -16,32 +16,44 @@
 
 .login-hero {
   position: relative;
-  height: 620px;
 }
+/* Four viewport-heights of scroll drive the sequence; the sticky stage is
+   exactly one, so the emblem holds still while the scenes change. */
 .login-hero .track {
-  height: 2600px;
+  height: 400vh;
   position: relative;
 }
 .login-hero .stage {
   position: sticky;
   top: 0;
-  height: 620px;
+  width: 100%;
+  height: 100vh;
   overflow: hidden;
+  /* A column, so the caption is laid out BELOW the emblem rather than
+     absolutely positioned over it. */
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: clamp(20px, 4vh, 48px);
+  padding: 6vh 24px;
 }
 
+/* Full-bleed: the layers paint the whole stage, not just the column of
+   content sitting in it. */
 .login-hero .bg-layer {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   opacity: 0;
 }
 .login-hero .bg-1 {
-  background: radial-gradient(ellipse at 50% 35%, var(--ink-glow-blue) 0%, var(--ink) 65%);
+  opacity: 1;
+  background: radial-gradient(ellipse 120vw 90vh at 50% 42%, var(--ink-glow-blue) 0%, var(--ink) 70%);
 }
 .login-hero .bg-2 {
-  background: radial-gradient(ellipse at 50% 40%, var(--ink-glow-amber) 0%, var(--ink) 70%);
+  background: radial-gradient(ellipse 120vw 90vh at 50% 45%, var(--ink-glow-amber) 0%, var(--ink) 72%);
 }
 .login-hero .bg-3 { background: var(--ink-deep); }
 
@@ -56,12 +68,16 @@
 
 .login-hero .chakra {
   position: absolute;
-  width: 520px;
-  height: 520px;
+  /* Centred with negative margins, not translate(-50%): the scroll handler
+     writes transform: rotate(...) and would overwrite a translate. */
+  --chakra-size: min(78vh, 88vw);
+  width: var(--chakra-size);
+  height: var(--chakra-size);
   border-radius: 50%;
   top: 50%;
   left: 50%;
-  margin: -260px 0 0 -260px;
+  margin-top: calc(var(--chakra-size) / -2);
+  margin-left: calc(var(--chakra-size) / -2);
   opacity: 0;
 }
 /* The chakra strokes inherit this, so the SVG carries no colour of its own. */
@@ -72,25 +88,40 @@
   position: relative;
   z-index: 5;
   perspective: 900px;
-  margin-top: -70px;
+  display: flex;
+  justify-content: center;
+  /* Leaves room for the caption block beneath it at any window height. */
+  flex: 0 1 auto;
+  min-height: 0;
 }
 .login-hero .emblem {
   display: block;
-  height: 340px;
+  /* Height-led, so the caption below always has room. The vw term only
+     bites on wide-and-short windows; narrow screens are handled below. */
+  height: min(56vh, 46vw);
   width: auto;
+  max-width: 100%;
   filter: drop-shadow(0 18px 40px var(--emblem-shadow));
   will-change: transform;
+  transform-origin: center bottom;
 }
 
+/* All three captions occupy the SAME grid cell, so they crossfade in place
+   and the block is only ever as tall as the tallest one -- they can never
+   print on top of each other or push the emblem around. */
+.login-hero .captions {
+  position: relative;
+  z-index: 6;
+  display: grid;
+  width: min(90%, 760px);
+  flex: 0 0 auto;
+}
 .login-hero .caption {
-  position: absolute;
-  left: 50%;
-  bottom: 64px;
-  transform: translate(-50%, 0);
+  grid-area: 1 / 1;
   text-align: center;
   opacity: 0;
-  width: 90%;
   pointer-events: none;
+  align-self: start;
 }
 .login-hero .caption .eyebrow {
   font-family: "IBM Plex Mono", monospace;
@@ -102,19 +133,20 @@
 }
 .login-hero .caption .head {
   font-family: "Source Serif 4", Georgia, serif;
-  font-size: 26px;
+  font-size: clamp(20px, 2.6vw, 30px);
+  line-height: 1.3;
   color: var(--paper);
   font-weight: 600;
 }
 .login-hero .caption .sub {
-  font-size: 13px;
+  font-size: clamp(12px, 1.3vw, 14px);
   color: var(--mist);
-  margin-top: 6px;
+  margin-top: 10px;
 }
 
 .login-hero .scroll-hint {
   position: absolute;
-  bottom: 14px;
+  bottom: 3vh;
   left: 50%;
   transform: translateX(-50%);
   color: var(--mist-dim);
@@ -316,7 +348,7 @@
   color: var(--paper);
 }
 
-.login-note {
+.login-page .login-note {
   font-size: 12px;
   line-height: 1.6;
   color: var(--mist-dim);
@@ -325,7 +357,7 @@
   border-left: 2px solid var(--brass-dim);
 }
 
-.login-error {
+.login-page .login-error {
   font-size: 12.5px;
   color: var(--login-error-text);
   background: var(--vermillion-bg);
@@ -333,7 +365,7 @@
   padding: 10px 12px;
   margin-bottom: 18px;
 }
-.login-status {
+.login-page .login-status {
   font-size: 12.5px;
   color: var(--login-ok-text);
   background: var(--login-ok-bg);
@@ -377,6 +409,9 @@
   .login-intro h1 { max-width: none; font-size: 28px; }
   .login-intro .roster { display: none; }
 }
+@media (max-width: 640px) {
+  .login-hero .emblem { height: min(46vh, 62vw); }
+}
 @media (max-width: 480px) {
   .login-section { padding: 64px 16px 80px; }
   .login-card { padding: 30px 22px 26px; }
@@ -386,11 +421,13 @@
    motion gets the final scene, statically, with the whole form still
    reachable by scrolling normally. */
 @media (prefers-reduced-motion: reduce) {
-  .login-hero, .login-hero .track { height: auto; }
-  .login-hero .stage { position: relative; height: 420px; }
-  .login-hero .bg-3 { opacity: 1; }
+  .login-hero .track { height: auto; }
+  .login-hero .stage { position: relative; height: auto; min-height: 78vh; }
+  .login-hero .bg-3 { opacity: 1 !important; }
   .login-hero .emblem { transform: none !important; }
-  .login-hero .scroll-hint { animation: none; }
-  .login-hero .caption { position: static; transform: none; opacity: 1; margin-top: 24px; }
-  .login-hero .caption.cap-1, .login-hero .caption.cap-2 { display: none; }
+  .login-hero .scroll-hint { display: none; }
+  /* Only the closing caption, and no longer stacked -- nothing crossfades. */
+  .login-hero .captions { display: block; }
+  .login-hero .caption { display: none; }
+  .login-hero .caption.cap-3 { display: block; opacity: 1 !important; }
 }
