@@ -29,6 +29,37 @@
 
   --radius: 8px;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 12px rgba(16, 24, 40, 0.05);
+
+  /* Sign-in screen only. The emblem title sequence is a fixed ceremonial
+     dark scene -- it does not invert with the theme, so these tokens have
+     no light/dark variants. Nothing behind the login uses them. */
+  --ink: #10192b;
+  --ink-deep: #0b0f17;
+  --ink-glow-blue: #1a2740;
+  --ink-glow-amber: #3a2414;
+  --ink-card-top: #16223a;
+  --ink-card-bottom: #121b2e;
+  --paper: #f3efe3;
+  --brass: #a98753;
+  --brass-dim: rgba(169, 135, 83, 0.35);
+  --vermillion: #b23a2e;
+  /* Channels alone, so the emblem glow can vary its alpha in JS without
+     a colour literal leaving this file. */
+  --vermillion-rgb: 178, 58, 46;
+  --vermillion-line: rgba(178, 58, 46, 0.14);
+  --vermillion-bg: rgba(178, 58, 46, 0.16);
+  --vermillion-border: rgba(178, 58, 46, 0.45);
+  --mist: #9ba5b8;
+  --mist-dim: #6b7488;
+  --mist-line: rgba(155, 165, 184, 0.1);
+  --mist-field: rgba(155, 165, 184, 0.28);
+  --login-error-text: #f0b4ac;
+  --login-ok-text: #c9d8b6;
+  --login-ok-bg: rgba(120, 150, 90, 0.14);
+  --login-ok-border: rgba(120, 150, 90, 0.4);
+  --field-bg: rgba(11, 15, 23, 0.6);
+  --field-bg-focus: rgba(11, 15, 23, 0.85);
+  --emblem-shadow: rgba(0, 0, 0, 0.55);
 }
 
 /* Dark under both the system preference and an explicit override, so a

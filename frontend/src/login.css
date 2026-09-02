@@ -1,0 +1,396 @@
+/* Sign-in screen: a scroll-driven Ashoka emblem title sequence above the
+   credentials card. Colour literals live in theme.css; this file is tokens
+   only.
+
+   The hero is a sticky stage inside a tall track -- scrolling the page maps
+   to a 0..1 progress value that drives three crossfading scenes. The emblem
+   is a flat asset, so it TILTS in perspective rather than rotating in 3D. */
+
+.login-page {
+  background: var(--ink-deep);
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  min-height: 100vh;
+}
+
+/* ---- hero ---------------------------------------------------------------- */
+
+.login-hero {
+  position: relative;
+  height: 620px;
+}
+.login-hero .track {
+  height: 2600px;
+  position: relative;
+}
+.login-hero .stage {
+  position: sticky;
+  top: 0;
+  height: 620px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-hero .bg-layer {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+.login-hero .bg-1 {
+  background: radial-gradient(ellipse at 50% 35%, var(--ink-glow-blue) 0%, var(--ink) 65%);
+}
+.login-hero .bg-2 {
+  background: radial-gradient(ellipse at 50% 40%, var(--ink-glow-amber) 0%, var(--ink) 70%);
+}
+.login-hero .bg-3 { background: var(--ink-deep); }
+
+.login-hero .grid-overlay {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--vermillion-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--vermillion-line) 1px, transparent 1px);
+  background-size: 42px 42px;
+}
+
+.login-hero .chakra {
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  border-radius: 50%;
+  top: 50%;
+  left: 50%;
+  margin: -260px 0 0 -260px;
+  opacity: 0;
+}
+/* The chakra strokes inherit this, so the SVG carries no colour of its own. */
+.login-hero .chakra { color: var(--brass); }
+.login-hero .chakra svg { width: 100%; height: 100%; }
+
+.login-hero .emblem-wrap {
+  position: relative;
+  z-index: 5;
+  perspective: 900px;
+  margin-top: -70px;
+}
+.login-hero .emblem {
+  display: block;
+  height: 340px;
+  width: auto;
+  filter: drop-shadow(0 18px 40px var(--emblem-shadow));
+  will-change: transform;
+}
+
+.login-hero .caption {
+  position: absolute;
+  left: 50%;
+  bottom: 64px;
+  transform: translate(-50%, 0);
+  text-align: center;
+  opacity: 0;
+  width: 90%;
+  pointer-events: none;
+}
+.login-hero .caption .eyebrow {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--brass);
+  margin-bottom: 8px;
+}
+.login-hero .caption .head {
+  font-family: "Source Serif 4", Georgia, serif;
+  font-size: 26px;
+  color: var(--paper);
+  font-weight: 600;
+}
+.login-hero .caption .sub {
+  font-size: 13px;
+  color: var(--mist);
+  margin-top: 6px;
+}
+
+.login-hero .scroll-hint {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--mist-dim);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  z-index: 6;
+  animation: login-bob 1.8s ease-in-out infinite;
+}
+@keyframes login-bob {
+  0%, 100% { transform: translate(-50%, 0); }
+  50% { transform: translate(-50%, 5px); }
+}
+
+/* ---- credentials --------------------------------------------------------- */
+
+.login-section {
+  position: relative;
+  background: var(--ink-deep);
+  padding: 96px 24px 110px;
+}
+.login-section::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--vermillion-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--vermillion-line) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(ellipse 900px 500px at 50% 0%, black, transparent 75%);
+  pointer-events: none;
+}
+.login-section::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1px;
+  height: 96px;
+  background: linear-gradient(to bottom, var(--brass), transparent);
+}
+
+.login-wrap {
+  position: relative;
+  z-index: 2;
+  max-width: 968px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  gap: 64px;
+  align-items: start;
+}
+
+.login-intro { padding-top: 18px; }
+.login-intro .tag {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--brass);
+  margin-bottom: 18px;
+}
+.login-intro h1 {
+  font-family: "Source Serif 4", Georgia, serif;
+  font-weight: 600;
+  font-size: 34px;
+  line-height: 1.22;
+  color: var(--paper);
+  max-width: 15ch;
+}
+.login-intro p {
+  margin-top: 18px;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--mist);
+  max-width: 42ch;
+}
+.login-intro .roster {
+  margin-top: 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--brass-dim);
+  padding-top: 18px;
+}
+.login-intro .roster div {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--mist-line);
+  font-size: 12.5px;
+  color: var(--mist-dim);
+}
+.login-intro .roster span:last-child {
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--mist);
+}
+
+.login-card {
+  position: relative;
+  background: linear-gradient(180deg, var(--ink-card-top) 0%, var(--ink-card-bottom) 100%);
+  border: 1px solid var(--brass-dim);
+  padding: 40px 36px 34px;
+}
+.login-card::before,
+.login-card::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--brass);
+}
+.login-card::before {
+  top: -1px;
+  left: -1px;
+  border-right: none;
+  border-bottom: none;
+}
+.login-card::after {
+  bottom: -1px;
+  right: -1px;
+  border-left: none;
+  border-top: none;
+}
+
+.login-card .mark {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.login-card .mark img {
+  width: 30px;
+  height: auto;
+  flex-shrink: 0;
+}
+.login-card .mark .marktext {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--mist-dim);
+  line-height: 1.5;
+}
+.login-card .mark .marktext strong {
+  display: block;
+  color: var(--paper);
+  font-family: "Source Serif 4", Georgia, serif;
+  font-size: 15px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 600;
+}
+
+.login-card .field {
+  margin-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.login-card .field label {
+  font-size: 12.5px;
+  color: var(--mist);
+  font-weight: 500;
+}
+.login-card .field input,
+.login-card .field select {
+  width: 100%;
+  background: var(--field-bg);
+  border: 1px solid var(--mist-field);
+  color: var(--paper);
+  font-family: "Inter", sans-serif;
+  font-size: 14.5px;
+  padding: 11px 13px;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.login-card .field input::placeholder { color: var(--mist-dim); }
+.login-card .field input:focus,
+.login-card .field select:focus {
+  border-color: var(--brass);
+  background: var(--field-bg-focus);
+}
+.login-card .field select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' stroke='%239BA5B8' stroke-width='1.4' fill='none' fill-rule='evenodd'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+  padding-right: 34px;
+}
+.login-card .field select option {
+  background: var(--ink-card-top);
+  color: var(--paper);
+}
+
+.login-note {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--mist-dim);
+  margin: 4px 0 22px;
+  padding-left: 12px;
+  border-left: 2px solid var(--brass-dim);
+}
+
+.login-error {
+  font-size: 12.5px;
+  color: var(--login-error-text);
+  background: var(--vermillion-bg);
+  border: 1px solid var(--vermillion-border);
+  padding: 10px 12px;
+  margin-bottom: 18px;
+}
+.login-status {
+  font-size: 12.5px;
+  color: var(--login-ok-text);
+  background: var(--login-ok-bg);
+  border: 1px solid var(--login-ok-border);
+  padding: 10px 12px;
+  margin-bottom: 18px;
+}
+
+.login-card button.primary {
+  width: 100%;
+  background: var(--vermillion);
+  color: var(--paper);
+  border: none;
+  font-family: "Inter", sans-serif;
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 13px 16px;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.05s ease;
+}
+.login-card button.primary:hover { filter: brightness(1.08); }
+.login-card button.primary:active { transform: translateY(1px); }
+.login-card button.primary:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.3) brightness(0.85);
+}
+
+.login-foot {
+  margin-top: 20px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--mist-dim);
+  font-family: "IBM Plex Mono", monospace;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 860px) {
+  .login-wrap { grid-template-columns: 1fr; gap: 40px; }
+  .login-intro h1 { max-width: none; font-size: 28px; }
+  .login-intro .roster { display: none; }
+}
+@media (max-width: 480px) {
+  .login-section { padding: 64px 16px 80px; }
+  .login-card { padding: 30px 22px 26px; }
+}
+
+/* The tilt/parallax is decoration. Anyone who has asked the OS to reduce
+   motion gets the final scene, statically, with the whole form still
+   reachable by scrolling normally. */
+@media (prefers-reduced-motion: reduce) {
+  .login-hero, .login-hero .track { height: auto; }
+  .login-hero .stage { position: relative; height: 420px; }
+  .login-hero .bg-3 { opacity: 1; }
+  .login-hero .emblem { transform: none !important; }
+  .login-hero .scroll-hint { animation: none; }
+  .login-hero .caption { position: static; transform: none; opacity: 1; margin-top: 24px; }
+  .login-hero .caption.cap-1, .login-hero .caption.cap-2 { display: none; }
+}
