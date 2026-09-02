@@ -25,9 +25,12 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -677,13 +680,29 @@ def snooze(alert_id: int, body: SnoozeRequest,
     return result
 
 
-app.include_router(auth_router)
-app.include_router(citizen_router)
-app.include_router(officer_router)
+# Every API route lives under /api. One service serves both the API and the
+# built React app, so the prefix is what keeps them apart: without it a work
+# route and a client route could claim the same path, and the SPA fallback
+# below would swallow API 404s as HTML.
+API_PREFIX = "/api"
+
+app.include_router(auth_router, prefix=API_PREFIX)
+app.include_router(citizen_router, prefix=API_PREFIX)
+app.include_router(officer_router, prefix=API_PREFIX)
 
 
-@app.get("/health")
-def health(db: Session = Depends(get_db)) -> dict:
+@app.get(f"{API_PREFIX}/health")
+def health() -> dict:
+    """Liveness for the platform's health check. No auth, no database.
+
+    Deliberately does not touch the database: a health check that opens a
+    connection turns a slow query into a restart loop.
+    """
+    return {"ok": True}
+
+
+@app.get(f"{API_PREFIX}/status")
+def status(db: Session = Depends(get_db)) -> dict:
     """Liveness plus the two numbers that say the pipeline has been run."""
     return {
         "status": "ok",
@@ -691,3 +710,49 @@ def health(db: Session = Depends(get_db)) -> dict:
         "works": db.execute(text("SELECT COUNT(*) FROM works")).scalar(),
         "alerts": db.execute(text("SELECT COUNT(*) FROM alerts")).scalar(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Static frontend
+#
+# EVERYTHING BELOW MUST BE THE LAST THING REGISTERED IN THIS FILE.
+# FastAPI matches routes in registration order, so the catch-all would
+# shadow every API route declared after it and return HTML where the client
+# expects JSON.
+# ---------------------------------------------------------------------------
+
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+# Guarded so local development without a build still runs: `npm run dev`
+# serves the app itself on another port and this block simply does nothing.
+if FRONTEND_DIR.is_dir():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=FRONTEND_DIR / "assets"),
+        name="assets",
+    )
+
+    _INDEX = FRONTEND_DIR / "index.html"
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa(full_path: str) -> FileResponse:
+        """Serve a real file when one exists, else index.html.
+
+        React Router owns paths like /officer/alerts/272 that exist only in
+        the browser. On a hard refresh the server is asked for them directly
+        and must answer with the app shell rather than a 404, or the router
+        never gets the chance to run.
+        """
+        # An unmatched /api path is a client error, not a page. Falling
+        # through to index.html would answer a bad API call with HTTP 200
+        # and HTML, which a fetch() would try to parse as JSON.
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+
+        # Resolve inside the build directory and confirm the result is still
+        # within it: a path like "../../backend/mplads.db" would otherwise
+        # escape and serve the database.
+        candidate = (FRONTEND_DIR / full_path).resolve()
+        if candidate.is_file() and candidate.is_relative_to(FRONTEND_DIR.resolve()):
+            return FileResponse(candidate)
+        return FileResponse(_INDEX)

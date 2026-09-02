@@ -16,7 +16,11 @@ smart_india_hackathon/
 node_modules/
 mplads.db-shm
 mplads.db-wal
-dist/
+
+# frontend/dist is deliberately NOT ignored: one Render web service serves
+# the built React app off the same process as the API, and the free tier has
+# no persistent disk or build step for it, so the build must be committed.
+# Same reason backend/mplads.db is tracked.
 
 # Local dev overrides -- per-machine port config, never shared.
 frontend/vite.config.local.mjs

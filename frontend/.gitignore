@@ -8,7 +8,8 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+# dist is committed on purpose -- the FastAPI service serves it (see the
+# root .gitignore for why). Vite's default template ignores it.
 dist-ssr
 *.local
 

@@ -14,7 +14,8 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/api/, ''),
+        // No rewrite: the backend serves its routes under /api itself, so
+        // stripping the prefix here would miss every one of them.
       },
     },
   },
