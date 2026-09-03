@@ -133,3 +133,32 @@ export function snoozeAlert(alertId, { days }) {
     body: { days },
   });
 }
+
+// --- citizen ---------------------------------------------------------------
+//
+// This router has no access to a risk score, so none of these can return one.
+// The guarantee is the absence of the field server-side, not a filter here.
+
+// No district or constituency parameter exists to pass: the scope comes from
+// the token. A citizen cannot widen it by editing a URL.
+export function getCitizenWorks({ status, limit = 50, offset = 0 } = {}) {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
+  return request(`/citizen/works?${params}`);
+}
+
+export function getCitizenWork(workId) {
+  return request(`/citizen/works/${workId}`);
+}
+
+// UNIQUE(work_id, user_id) means a second attempt returns 409 rather than
+// quietly succeeding -- that constraint is what keeps C6's distinct-reporter
+// count meaningful, so the UI reports the refusal instead of hiding it.
+export function fileComplaint(workId, { text, lat = null, lon = null }) {
+  return request(`/citizen/works/${workId}/complaint`, {
+    method: "POST",
+    body: { text, lat, lon },
+  });
+}

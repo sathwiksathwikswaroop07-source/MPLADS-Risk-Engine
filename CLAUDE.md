@@ -123,7 +123,7 @@ Mark a step complete only when its Definition of Done passes.
 | 07 | Alert detail with evidence pack | ☑ |
 | 08 | Accuracy evaluation script | ☑ |
 | 09 | Ministry / State dashboards | ☐ |
-| 10 | Citizen portal and complaint page | ☐ |
+| 10 | Citizen portal and complaint page | ☑ |
 | 11 | CSV / Excel upload | ☐ |
 | 12 | Demo seed data and polish | ☐ |
 

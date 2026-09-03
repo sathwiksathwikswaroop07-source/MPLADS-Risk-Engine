@@ -3,7 +3,8 @@ import { AuthProvider, useAuth, PORTAL, ACTOR_ROLES } from "./auth";
 import Login from "./Login";
 import Worklist from "./officer/Worklist";
 import AlertDetail from "./officer/AlertDetail";
-import Layout from "./components/Layout";
+import Works from "./citizen/Works";
+import WorkDetail from "./citizen/WorkDetail";
 
 // Route guards keep a role off a page it would only see broken. They are not
 // the access control: every API call still returns 403 or 404 on its own.
@@ -21,21 +22,6 @@ function RequireRole({ allow, children }) {
 function Home() {
   const { user } = useAuth();
   return <Navigate to={user ? PORTAL[user.role] ?? "/login" : "/login"} replace />;
-}
-
-// The citizen portal is step 10. Until then a citizen login lands somewhere
-// deliberate rather than on a blank screen -- and never on a score.
-function CitizenStub() {
-  return (
-    <Layout portalName="Citizen portal" home="/citizen">
-      <div className="state-box empty">
-        <strong>The citizen portal is not built yet.</strong>
-        <span className="state-hint">
-          Works, photographs and the complaint form arrive in step 10.
-        </span>
-      </div>
-    </Layout>
-  );
 }
 
 function AppRoutes() {
@@ -68,8 +54,14 @@ function AppRoutes() {
         </RequireRole>
       } />
 
+      {/* Citizens see facts -- cost, dates, status, contractor, photographs
+          -- and never a score. The citizen router has no code path that
+          selects one, so that is structural rather than a filter here. */}
       <Route path="/citizen" element={
-        <RequireRole allow={["citizen"]}><CitizenStub /></RequireRole>
+        <RequireRole allow={["citizen"]}><Works /></RequireRole>
+      } />
+      <Route path="/citizen/works/:workId" element={
+        <RequireRole allow={["citizen"]}><WorkDetail /></RequireRole>
       } />
 
       <Route path="/" element={<Home />} />
