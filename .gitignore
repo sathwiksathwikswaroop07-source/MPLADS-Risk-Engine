@@ -12,7 +12,7 @@ smart_india_hackathon/
 .env.*
 !.env.example
 
-# Node
+# Nodegit reset package-lock.json
 node_modules/
 mplads.db-shm
 mplads.db-wal
