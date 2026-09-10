@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth, PORTAL, ACTOR_ROLES } from "./auth";
 import Login from "./Login";
 import Worklist from "./officer/Worklist";
+import Dashboard from "./officer/Dashboard";
 import AlertDetail from "./officer/AlertDetail";
 import Works from "./citizen/Works";
 import WorkDetail from "./citizen/WorkDetail";
@@ -32,6 +33,11 @@ function AppRoutes() {
       {/* Officers act. */}
       <Route path="/officer" element={
         <RequireRole allow={ACTOR_ROLES}>
+          <Dashboard basePath="/officer" portalName="Officer workspace" />
+        </RequireRole>
+      } />
+      <Route path="/officer/alerts" element={
+        <RequireRole allow={ACTOR_ROLES}>
           <Worklist basePath="/officer" portalName="Officer worklist" />
         </RequireRole>
       } />
@@ -44,6 +50,11 @@ function AppRoutes() {
       {/* Oversight watches: the same two screens, with can_act false from the
           API removing every action button. */}
       <Route path="/oversight" element={
+        <RequireRole allow={["mp", "ministry"]}>
+          <Dashboard basePath="/oversight" portalName="Oversight workspace" />
+        </RequireRole>
+      } />
+      <Route path="/oversight/alerts" element={
         <RequireRole allow={["mp", "ministry"]}>
           <Worklist basePath="/oversight" portalName="Oversight" />
         </RequireRole>
