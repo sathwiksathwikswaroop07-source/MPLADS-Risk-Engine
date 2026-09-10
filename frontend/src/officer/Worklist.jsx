@@ -8,11 +8,9 @@ import PriorityBanner from "./PriorityBanner";
 // Fixed option lists. The API does not validate these: an unknown status or
 // severity returns an empty list that looks like "no data", and an unknown
 // subject_type raises a KeyError server-side. Dropdowns make both impossible.
-//
-// "critical" is a real band in config.SEVERITY_BANDS but no alert in the data
-// reaches 70, so offering it would be a filter that always returns nothing.
 const SEVERITIES = [
   ["", "All severities"],
+  ["critical", "Critical"],
   ["high", "High"],
   ["medium", "Medium"],
 ];

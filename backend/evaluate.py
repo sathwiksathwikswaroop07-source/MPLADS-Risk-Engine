@@ -48,7 +48,28 @@ SUBJECT_LABELS = (
 
 
 def load_work_truth(session) -> dict[str, list[tuple[int, int]]]:
-    """label -> [(work_id, total_score)] for every planted work."""
+    """label -> [(work_id, total_score)] for every planted work.
+
+    Ground truth comes from two places, because a work has one
+    planted_anomaly column and a handful of works carry two problems at once
+    -- the stacked works that make the critical band reachable.
+
+    The primary label stays in the column, so the ordinary per-label table and
+    build_child_records' dispatch keep working unchanged. Each additional
+    label is recorded in audit_log, exactly as MP and vendor ground truth
+    already are, and merged back here.
+
+    The alternative -- comma-joining labels into the column -- was rejected:
+    it is read by exact equality in four places, so it would have produced a
+    bogus "cost_overrun,ghost_asset" row in this table and quietly dropped
+    recall for both real labels.
+
+    A stacked work therefore appears under BOTH its labels, which is the
+    honest accounting: each label's recall is measured over every work that
+    genuinely carries it. It also means the per-label counts sum to more than
+    the number of distinct planted works, which is why the totals below count
+    distinct work_ids rather than adding the columns up.
+    """
     rows = session.execute(text("""
         SELECT works.planted_anomaly AS label,
                works.work_id AS subject_id,
@@ -63,6 +84,24 @@ def load_work_truth(session) -> dict[str, list[tuple[int, int]]]:
 
     truth: dict[str, list[tuple[int, int]]] = {}
     for row in rows:
+        truth.setdefault(row["label"], []).append(
+            (row["subject_id"], row["total_score"]))
+
+    # The secondary labels of the stacked works.
+    extra = session.execute(text("""
+        SELECT audit_log.detail AS label,
+               audit_log.subject_id AS subject_id,
+               COALESCE(scores.total_score, 0) AS total_score
+        FROM audit_log
+        LEFT JOIN scores
+               ON scores.subject_type = 'work'
+              AND scores.subject_id = audit_log.subject_id
+        WHERE audit_log.action = 'planted_anomaly'
+          AND audit_log.subject_type = 'work'
+        ORDER BY audit_log.detail, audit_log.subject_id
+    """)).mappings().all()
+
+    for row in extra:
         truth.setdefault(row["label"], []).append(
             (row["subject_id"], row["total_score"]))
     return truth
@@ -144,10 +183,20 @@ def evaluate(session) -> dict:
                        if score >= config.ALERT_MIN_SCORE)
 
     planted_total = sum(row["planted"] for _, _, row in labels)
-    work_planted = sum(row["planted"] for level, _, row in labels
-                       if level == "work")
-    work_caught = sum(row["alerted"] for level, _, row in labels
-                      if level == "work")
+
+    # Counted over DISTINCT work_ids, not by adding the per-label columns up.
+    # A stacked work appears under both of its labels -- correctly, since each
+    # label's recall is measured over every work carrying it -- so summing the
+    # columns would count those works twice and overstate both the planted
+    # total and the catch rate.
+    work_scores: dict[int, int] = {}
+    for label in WORK_LABELS:
+        for work_id, score in work_truth.get(label, []):
+            work_scores[work_id] = score
+
+    work_planted = len(work_scores)
+    work_caught = sum(1 for score in work_scores.values()
+                      if score >= config.ALERT_MIN_SCORE)
 
     return {
         "labels": labels,

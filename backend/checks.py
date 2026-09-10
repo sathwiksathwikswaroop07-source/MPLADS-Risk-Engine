@@ -793,6 +793,23 @@ def check_c3_mp_quota(mp_row: dict, subject: Subject):
                               "quota shares cannot be computed.")
         return None
 
+    # A member with no works in the data has zero SC spend and zero ST spend,
+    # which arithmetically reads as a total breach of both floors and awards
+    # the maximum. That is not a compliance finding, it is missing data: the
+    # quota is a share OF SPENDING, and a member who has commissioned nothing
+    # has no spending to take a share of.
+    #
+    # Left unguarded this is the loudest thing in the system -- every Rajya
+    # Sabha member scored the full 48 and ranked above every member the
+    # generator deliberately pushed under the floor. Worse, evaluate.py
+    # cannot see it: only works are in the false-positive denominator, so 20
+    # false accusations scored 100% recall.
+    if (mp_row["works_count"] or 0) <= 0:
+        subject.skip("C3-MP", "No works recorded for this member, so there is "
+                              "no spending to measure the quota shares "
+                              "against.")
+        return None
+
     findings = []
     total = 0
 
@@ -899,7 +916,8 @@ _MP_AGGREGATE_SQL = text("""
     SELECT mps.mp_id,
            COALESCE(rel.released, 0) AS released,
            COALESCE(sc.spent, 0) AS sc_spent,
-           COALESCE(st.spent, 0) AS st_spent
+           COALESCE(st.spent, 0) AS st_spent,
+           COALESCE(cnt.works_count, 0) AS works_count
     FROM mps
     LEFT JOIN (
         SELECT mp_id, SUM(released) AS released
@@ -915,6 +933,11 @@ _MP_AGGREGATE_SQL = text("""
         FROM works WHERE is_st_area = 1 AND status <> 'recommended'
         GROUP BY mp_id
     ) AS st ON st.mp_id = mps.mp_id
+    LEFT JOIN (
+        SELECT mp_id, COUNT(*) AS works_count
+        FROM works WHERE status <> 'recommended'
+        GROUP BY mp_id
+    ) AS cnt ON cnt.mp_id = mps.mp_id
     ORDER BY mps.mp_id
 """)
 
@@ -1394,6 +1417,55 @@ def main() -> None:
             lead = reasons[0]["check"] if reasons else "-"
             print(f"    {score.total_score:>3}  {score.subject_type}/"
                   f"{score.subject_id:<6} led by {lead}")
+
+        session.flush()
+        print_demo_pointers(session)
+
+
+# ---------------------------------------------------------------------------
+# Demo pointers
+# ---------------------------------------------------------------------------
+
+# alert_id is an autoincrement PK assigned in insert order, and run_checks
+# deletes and rebuilds the table, so the ids are stable for a given dataset
+# but move the moment the generator changes. DEMO.md therefore quotes no ids
+# of its own -- it points here, and this block is authoritative.
+_DEMO_POINTER_SQL = text("""
+    SELECT alerts.alert_id,
+           alerts.severity,
+           scores.total_score,
+           works.work_id,
+           districts.name AS district
+    FROM alerts
+    JOIN scores ON scores.score_id = alerts.score_id
+    JOIN works ON works.work_id = scores.subject_id
+    JOIN districts ON districts.district_id = works.district_id
+    WHERE scores.subject_type = 'work'
+      AND districts.name = :district
+    ORDER BY scores.total_score DESC, alerts.alert_id
+    LIMIT 1
+""")
+
+
+def print_demo_pointers(session) -> None:
+    """The ids DEMO.md needs, re-derived on every run."""
+    print("\n  Demo pointers (DEMO.md reads these, never hardcoded ids)")
+
+    pointers = {}
+    for district in ("Pune", "Nashik"):
+        row = session.execute(_DEMO_POINTER_SQL,
+                              {"district": district}).mappings().first()
+        if row is None:
+            print(f"    {district:8} no alert -- check the data")
+            continue
+        pointers[district] = row["alert_id"]
+        print(f"    {district:8} alert {row['alert_id']:<5} "
+              f"work {row['work_id']:<5} score {row['total_score']:>3} "
+              f"({row['severity']})")
+
+    if "Pune" in pointers:
+        print(f"    Paste /officer/alerts/{pointers['Pune']} into do.nashik "
+              f"-> 404, the alert is hidden rather than refused.")
 
 
 if __name__ == "__main__":

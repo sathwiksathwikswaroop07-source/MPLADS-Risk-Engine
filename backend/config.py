@@ -349,7 +349,12 @@ C8_PRICE_POINTS = 16
 # share: without it a two-work bucket reads 100% concentration on noise.
 C8_MIN_WORKS_FOR_CONCENTRATION = 6
 C8_CONCENTRATION_THRESHOLD = 0.60
-C8_CONCENTRATION_POINTS = 8
+# Nine, matching C8_PAYMENT_SHARE_POINTS and for the same reason: every
+# corroborating component was sized so that price plus one summed to exactly
+# 24, one point under ALERT_MIN_SCORE. A vendor priced 2.6x their peers who
+# also holds 64% of a district's works of one type is the pairing this check
+# is for, and it was being lost to rounding rather than to judgement.
+C8_CONCENTRATION_POINTS = 9
 
 # A vendor whose works keep turning up on the worklist. Reuses the scores
 # already computed rather than re-deriving anything.
@@ -358,9 +363,19 @@ C8_FLAGGED_SHARE_THRESHOLD = 0.40
 C8_FLAGGED_SHARE_POINTS = 10
 
 # Share of a district's total payments reaching one vendor.
+#
+# Nine rather than eight for the same reason C8_PRICE_POINTS went from 14 to
+# 16: price (16) plus this component summed to exactly 24 and stayed silent
+# one point below ALERT_MIN_SCORE. A vendor priced 2.1x their peers across 24
+# jobs who also draws 54% of a district's payments is precisely the pairing
+# this check exists to surface, and it was being lost to rounding.
+#
+# Still sub-threshold on its own (9 < 25), so holding a large share of a
+# small district's payments remains a note rather than a case -- which is the
+# stated intent: no single C8 component may reach the threshold alone.
 C8_MIN_DISTRICT_PAYMENT = 10_000_000   # ignore trivially small districts
 C8_PAYMENT_SHARE_THRESHOLD = 0.45
-C8_PAYMENT_SHARE_POINTS = 8
+C8_PAYMENT_SHARE_POINTS = 9
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +456,75 @@ PLANTED_ANOMALY_COUNTS = {
     "ghost_asset": 30,            # complete, fully paid, no evidence rows
 }
 PLANTED_QUOTA_SHORTFALL_MPS = 4   # MPs forced under the 15% SC floor
+
+# Works carrying MORE THAN ONE problem at once, so the critical band is
+# reachable at all.
+#
+# Every check caps well below 70: the largest single award is 35 (C1, C7).
+# With one anomaly per work the ceiling is about 50, so SEVERITY_BANDS'
+# critical rung -- and the --sev-critical tokens that style it -- were dead
+# code against real data. A subject only earns 70 by being wrong in several
+# independent ways at once, which is also the honest reading of "critical":
+# not one severe number, but a work that fails several unrelated tests.
+#
+# The point columns are independent (C1, C3, C5, C6, C7 all run and write to
+# different columns; only C2/C2b are mutually exclusive), so these sum for
+# real rather than by coincidence.
+#
+# Kept deliberately small. Twelve of ~4500 works is about 0.3% -- enough that
+# the band is populated and the worklist opens on a genuine one, few enough
+# that it stays plausible. Each component is itself a real planted anomaly,
+# so these are true positives: they must not move the false-positive rate.
+PLANTED_STACKED_CRITICAL = 12
+
+# The primary label goes in works.planted_anomaly; the rest are recorded in
+# audit_log, exactly as MP and vendor ground truth already are. Ordered
+# primary-first, the primary being whichever check awards the most.
+# long_delay is deliberately NOT paired with ghost_asset: ghost_asset marks
+# the work completed, and C2 exempts completed works (checks.py), so the
+# delay label could never be earned. Labelling ground truth with a problem no
+# check can find would depress that label's recall for a reason that has
+# nothing to do with detection.
+STACKED_CRITICAL_COMBINATIONS = (
+    ("cost_overrun", "ghost_asset"),            # C1 35 + C7 ~27 + C6
+    ("cost_overrun", "payment_ahead_of_work"),  # C1 35 + C7 ~25 + C6
+    ("long_delay", "payment_ahead_of_work"),    # C2 25 + C7 ~25 + C6
+)
+
+# Verified citizen reports attached to each stacked work. C6 bands at
+# 1 -> 5, 2-3 -> 10, 4+ -> 15, and two of the three combinations need that
+# top band to clear 70. Planted as verified = 1 rather than left to the
+# 65% coin flip the ordinary complaint pass uses: a critical count that
+# moved with the random draw would not be reproducible.
+STACKED_CRITICAL_COMPLAINTS = 4
+
+# C1 is fence-first: a work must clear Q3 + 1.5*IQR before any ratio band
+# applies, so in a tightly clustered peer group even a 3-6x multiple can
+# score zero. That is correct behaviour and must not be weakened -- but a
+# work planted to demonstrate the critical band should not depend on the
+# spread of whichever peer group it happened to land in. Planting at the top
+# of the range clears the fence in every peer group observed.
+STACKED_COST_MULTIPLE_RANGE = (5.0, 6.0)
+
+# Likewise pinned to C2's top band (540+ days) rather than the wider range
+# the standalone long_delay label uses, so the delay component is a reliable
+# 25 rather than sometimes 18.
+STACKED_DELAY_DAYS_RANGE = (560, 700)
+
+# Comfortably past C7_STALE_DAYS (180), so a fully paid record that has not
+# been touched contributes its stale component too.
+STACKED_STALE_DAYS = 220
+
+# The districts the demo signs into, in order. One stacked work is pinned to
+# each so the opening worklist actually has a critical row on it -- left to
+# the shuffle these scatter one per district across the country and do.pune
+# opens on a medium.
+DEMO_DISTRICTS = ("Pune", "Nashik")
+
+# The state whose officer the demo signs in as. One planted quota shortfall
+# is pinned here so that worklist actually holds the MP-level rows the beat
+# is meant to show.
+DEMO_STATE_CODE = "MH"
 
 # Share of works flagged as falling in a Scheduled Caste or Scheduled Tribe
 # area. The statutory floors are measured on SPEND, not on the number of

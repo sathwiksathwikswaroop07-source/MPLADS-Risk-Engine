@@ -125,7 +125,7 @@ Mark a step complete only when its Definition of Done passes.
 | 09 | Ministry / State dashboards | ☐ |
 | 10 | Citizen portal and complaint page | ☑ |
 | 11 | CSV / Excel upload | ☐ |
-| 12 | Demo seed data and polish | ☐ |
+| 12 | Demo seed data and polish | ☑ |
 
 **Steps 01–08 are the minimum viable prototype.** Step 08 sits ahead of
 the extra screens deliberately — the accuracy number is worth more than
@@ -550,7 +550,20 @@ it an early warning. Enforce this in `checks.py` with an explicit
 
 | Check | Max | Rule |
 |---|---|---|
-| **C3-MP quota** | 25 | SC-area spend below 15% of released funds → up to 15, scaled by shortfall. ST-area below 7.5% → up to 10. These stack. |
+| **C3-MP quota** | 48 | SC-area spend below 15% of released funds → 14 flat + up to 15 scaled by shortfall. ST-area below 7.5% → 9 flat + up to 10 scaled. These stack. |
+
+A breached statutory floor carries a **flat award on its own**, with the scaled
+part separating a near miss from spending nothing at all. Purely proportional
+scoring put a member at a third of the SC floor below the alert threshold — the
+breach was real, detected, and still never reached an officer, which made the
+check decorative. Reasoning in `config.py`.
+
+**Skip the check when the member has no works.** Zero SC spend over zero works
+is arithmetically a total breach of both floors and awards the maximum, but it
+is missing data, not a compliance finding: the quota is a share *of spending*,
+and a member who has commissioned nothing has none. Left unguarded this was the
+loudest thing in the system, and `evaluate.py` could not see it — only works
+are in the false-positive denominator.
 
 ### District-level — `subject_type = 'district'`
 
@@ -562,7 +575,14 @@ it an early warning. Enforce this in `checks.py` with an explicit
 
 | Check | Max | Rule |
 |---|---|---|
-| **C8 vendor conduct** | 30 | Median unit cost ≥ 1.6× the work_type median over ≥ 4 works → 16. ≥ 60% of a district's works of one type → 8. ≥ 40% of their works already flagged → 10. ≥ 45% of a district's payments → 8. Sum, capped. |
+| **C8 vendor conduct** | 30 | Median unit cost ≥ 1.6× the work_type median over ≥ 4 works → 16. ≥ 60% of a district's works of one type → 9. ≥ 40% of their works already flagged → 10. ≥ 45% of a district's payments → 9. Sum, capped. |
+
+The corroborating components are 9, not 8, for the same reason the price
+component went from 14 to 16: **price plus any one of them summed to exactly
+24**, one point under the threshold, so the strongest realistic pairings were
+being lost to rounding rather than to judgement. Each is still sub-threshold
+alone — no single component may raise a case, because a vendor may hold most of
+a small district's work simply because few firms bid there.
 
 Scored against the **vendor**, never against their works — charging it
 per-work would flag every contract that vendor ever won, exactly as
@@ -648,10 +668,40 @@ data."*
 | `payment_ahead_of_work` | 40 | Payment ratio 0.75–0.95, progress 0.10–0.30 |
 | `ghost_asset` | 30 | Marked complete, no evidence, fully paid |
 | `quota_shortfall` | 4 MPs | SC spend forced under 15% |
+| stacked criticals | 12 | Two problems on one work, so 70+ is reachable |
 
-~290 planted out of ~4,500. Everything else must be clean — if clean
+~300 planted out of ~4,500. Everything else must be clean — if clean
 rows trip checks, the false-positive rate is real and you loosen
 thresholds rather than hide it.
+
+### Stacked works, and where their ground truth lives
+
+Every check caps well below 70 — the largest single award is 35 — so with one
+anomaly per work the ceiling was about 50 and the **critical band was
+unreachable**. A subject earns 70 by being wrong in several independent ways at
+once, which is also the honest reading of the word.
+
+A work has one `planted_anomaly` column and these carry two labels. The primary
+label stays in the column; the additional label goes in `audit_log`, exactly as
+MP and vendor ground truth already do, and `evaluate.py` merges both.
+
+**Never comma-join labels into the column.** It is read by exact equality in
+four places, so a joined value creates a phantom `"cost_overrun,ghost_asset"`
+row in the recall table and quietly drops recall for both real labels.
+
+The primary label is always the C7 one, and that is not cosmetic:
+`build_child_records` dispatches on the column to decide the payment ratio and
+whether to withhold evidence, so it must see the label whose signal lives in the
+child rows.
+
+Because a stacked work appears under both labels, **the work-level totals count
+distinct `work_id`s** rather than summing the per-label columns — otherwise
+those works are counted twice in both recall and precision.
+
+Do not pair `long_delay` with `ghost_asset`: `ghost_asset` marks the work
+completed and C2 exempts completed works, so the delay label could never be
+earned. Labelling ground truth with a problem no check can find depresses that
+label's recall for reasons that have nothing to do with detection.
 
 Generate some works with `progress_pct = 0` and empty
 `progress_updates` on purpose, so the graceful-degradation path is
@@ -842,10 +892,21 @@ The second run must produce the same alert count and top-10 scores.
 
 ```bash
 python -m backend.evaluate        # recall must not drop
-grep -rn "date.today\|datetime.now" backend/          # empty
+grep -rn "date.today" backend/                        # empty
+grep -rn "datetime.now" backend/                      # 3 hits, auth.py only
+grep -rn "planted" backend/checks.py                  # empty
 grep -rni "fraud\|scam\|corrupt" backend/             # empty
 grep -rn "SELECT \*" backend/                         # empty
 ```
+
+The three `datetime.now()` calls in `auth.py` are **correct and must not be
+"fixed"** — JWT expiry, `last_login_at` and audit timestamps are real
+wall-clock events, and freezing them to `REFERENCE_DATE` would issue tokens
+that expired in 2026. Nothing *scored* reads them.
+
+`grep -rn "planted" backend/checks.py` returning empty is the one a judge can
+check for themselves: it proves the scoring code cannot see the ground-truth
+labels, so the recall number is not marking its own homework.
 
 Then open the app and click the top alert. If you cannot explain out
 loud why it scored what it scored, using only what is on screen, the
@@ -873,6 +934,9 @@ step is not done.
 | Letting C2 and C2b both fire | One delay charged twice in `delay_points` |
 | C1 ratio points without clearing the fence | A tight peer group flags half of itself |
 | `checks.py` reading `BASE_UNIT_COST` | Scoring against our own generator = fake recall |
+| Summing per-label planted counts | Double-counts stacked works in recall and precision |
+| Comma-joining labels into `planted_anomaly` | Phantom label rows; real labels silently lose recall |
+| Scoring an MP who has no works | Zero over zero reads as a total quota breach and awards the max |
 
 ---
 
@@ -883,11 +947,18 @@ step is not done.
   and access control is proven rather than described. It is 404 rather
   than 403 on purpose: the response must not confirm that the alert
   exists. Say "the alert is hidden, not refused".
-- Show the State Officer once — the MP-quota and district-utilisation
-  alerts he gets that the district officer does not.
-- Excel upload answers "how does this connect to eSAKSHI?" in five
-  seconds. Click it.
+- Show the State Officer once — the MP-quota alerts they get that the
+  district officer does not. One quota shortfall is planted in the demo
+  state deliberately, so that worklist is never empty.
+- **District-utilisation alerts do not exist yet.** `C4_MAX_POINTS` is 15
+  and `ALERT_MIN_SCORE` is 25, so a district can never raise an alert on
+  C4 alone. Fixing it means changing what a score means system-wide, so
+  it is its own step — do not promise it in the demo.
+- **Excel upload is not built** (step 11). Do not click it; say it is
+  designed and name it as the next step.
 - Close on the recall number.
+- The full script, with the account list and the ids to use, is in
+  `DEMO.md`. Alert ids are re-derived by `checks.py` — never hardcoded.
 - Nothing new is built on the last day: evaluation and rehearsal only.
   Record a backup video.
 

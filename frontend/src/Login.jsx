@@ -18,6 +18,24 @@ const ROLE_SCOPE = {
   ministry: "National oversight",
 };
 
+// Seeded by backend/generate_data.py, which is also where the password
+// lives. Shown rather than hidden: this build is the prototype, and an
+// unlabelled block of credentials nobody can test is worse than a labelled
+// one.
+//
+// Selecting an account only fills the three fields a human would type -- it
+// does not sign in. The role stays a filter the server checks in its WHERE
+// clause, so picking an account and then changing the dropdown by hand still
+// fails, which is worth demonstrating.
+const DEMO_PASSWORD = "mplads2026";
+const DEMO_ACCOUNTS = [
+  { username: "do.pune", role: "district_officer", note: "Pune worklist" },
+  { username: "do.nashik", role: "district_officer", note: "Nashik worklist" },
+  { username: "so.mh", role: "state_officer", note: "Adds MP-level alerts" },
+  { username: "ministry.mospi", role: "ministry", note: "Read-only, national" },
+  { username: "citizen001", role: "citizen", note: "Facts, never a score" },
+];
+
 function clamp(v, a, b) {
   return Math.max(a, Math.min(b, v));
 }
@@ -187,6 +205,16 @@ export default function Login() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // Fills the form and stops there, deliberately: the submit path stays the
+  // single place sign-in happens, and on a projector the filled form is worth
+  // seeing before it is sent.
+  const fillDemoAccount = useCallback((account) => {
+    setUsername(account.username);
+    setPassword(DEMO_PASSWORD);
+    setRole(account.role);
+    setError("");
+  }, []);
+
   const onSubmit = useCallback(
     async (e) => {
       e.preventDefault();
@@ -244,6 +272,27 @@ export default function Login() {
                   <span>{ROLE_SCOPE[r]}</span>
                 </div>
               ))}
+            </div>
+
+            <div className="demo-accounts">
+              <p className="demo-caption">
+                Prototype accounts, seeded with the sample data. Selecting one
+                fills the form; you still sign in. Password{" "}
+                <code>{DEMO_PASSWORD}</code>.
+              </p>
+              <div className="demo-chips">
+                {DEMO_ACCOUNTS.map((account) => (
+                  <button
+                    key={account.username}
+                    type="button"
+                    className="demo-chip"
+                    onClick={() => fillDemoAccount(account)}
+                  >
+                    <span className="demo-chip-name">{account.username}</span>
+                    <span className="demo-chip-note">{account.note}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

@@ -389,7 +389,8 @@ def build_users(session, rng, fake, states, districts, constituencies, mps):
 
     # The demo script depends on these two: log in as do.pune, then as
     # do.nashik, and the worklists differ. Pasting Pune's alert URL into
-    # Nashik's session must 403.
+    # Nashik's session must 404 -- not 403, so the response does not confirm
+    # that the alert exists. The alert is hidden, not refused.
     add("do.pune", "District Officer, Pune", "district_officer",
         "district", by_name["Pune"].district_id)
     add("do.nashik", "District Officer, Nashik", "district_officer",
@@ -413,9 +414,23 @@ def build_users(session, rng, fake, states, districts, constituencies, mps):
     add("ministry.mospi", "MoSPI Monitoring Cell", "ministry", "national", None)
 
     # A handful of MP logins. An MP is a person in the scheme (mps); a user
-    # is a login. Keep them separate.
+    # is a login. Keep them separate: the slug below is cosmetic, and
+    # users.mp_id remains the only link to the person.
+    #
+    # Named after the seat rather than the member -- mp.pune reads as an
+    # account on a projector where mp7 reads as test data, and a seat
+    # outlives whoever holds it.
+    constituency_names = {c.constituency_id: c.name for c in constituencies}
+    taken = set()
     for mp in mps[:6]:
-        slug = f"mp{mp.mp_id}"
+        seat = constituency_names[mp.constituency_id].lower()
+        seat = seat.replace(" ", "").replace("-", "")
+        slug = f"mp.{seat}"
+        # Seat names are unique per state, not nationally; fall back to the
+        # id rather than silently colliding on a UNIQUE column.
+        if slug in taken:
+            slug = f"mp.{seat}{mp.mp_id}"
+        taken.add(slug)
         add(slug, mp.full_name, "mp", "constituency", mp.constituency_id,
             mp_id=mp.mp_id)
 
@@ -1006,8 +1021,104 @@ def plant_anomalies(session, rng, works, mps, districts, agencies, vendors):
         work.last_updated_on = work.completed_on
         work.planted_anomaly = "ghost_asset"
 
+    by_name = {d.name: d.district_id for d in districts}
+    demo_district_ids = [by_name[name] for name in config.DEMO_DISTRICTS
+                         if name in by_name]
+    stacked = _plant_stacked_critical(rng, take, ref, demo_district_ids)
+
     session.flush()
-    return works
+    return works, stacked
+
+
+def _plant_stacked_critical(rng, take, ref, demo_district_ids=()):
+    """Works carrying two problems at once, so the critical band is reachable.
+
+    Every check caps well below 70 -- the largest single award is 35 -- so
+    with one anomaly per work nothing ever reached critical and the band was
+    dead. A subject earns 70 by being wrong in several independent ways at
+    once, which is the honest reading of the word.
+
+    Returns [(work, [labels...])], primary label first. The primary is always
+    the C7 one, and that is not cosmetic: build_child_records dispatches on
+    works.planted_anomaly to decide the payment ratio and whether to withhold
+    evidence, so the label it reads has to be the one whose signal lives in
+    the child rows. The cost and delay labels are pure column mutations on the
+    work itself and need no such cooperation, which is why they can be the
+    secondary label without losing anything.
+    """
+    combinations = config.STACKED_CRITICAL_COMBINATIONS
+    per_combination = config.PLANTED_STACKED_CRITICAL // len(combinations)
+    stacked = []
+
+    # The demo opens on do.pune and moves to do.nashik, so each of those two
+    # districts needs one of these to land in it. Left to the shuffle they
+    # scatter one per district across the country and the opening worklist
+    # has no critical row on it at all.
+    demo_queue = list(demo_district_ids)
+
+    for index, (first, second) in enumerate(combinations):
+        # The C7 label leads, whichever side of the pair it is on.
+        primary, secondary = (second, first) if second in (
+            "ghost_asset", "payment_ahead_of_work") else (first, second)
+
+        # One pinned district per combination, while any remain.
+        pinned = demo_queue.pop(0) if demo_queue else None
+        chosen = []
+        if pinned is not None:
+            chosen = take(1, lambda w, d=pinned: w.district_id == d
+                          and w.sanctioned_on is not None
+                          and w.vendor_id is not None)
+
+        chosen += take(per_combination - len(chosen),
+                       lambda w: w.sanctioned_on is not None
+                       and w.vendor_id is not None)
+
+        for work in chosen:
+            if secondary == "cost_overrun":
+                multiple = rng.uniform(*config.STACKED_COST_MULTIPLE_RANGE)
+                work.estimated_cost = int(round(work.estimated_cost * multiple))
+                if work.final_cost is not None:
+                    work.final_cost = int(round(work.final_cost * multiple))
+
+            elif secondary == "long_delay":
+                days = rng.randint(*config.STACKED_DELAY_DAYS_RANGE)
+                sanctioned_on = ref - timedelta(days=days)
+                duration = config.EXPECTED_DURATION_DAYS[
+                    (work.work_type, work.area_type)]
+                work.recommended_on = _iso(
+                    sanctioned_on - timedelta(days=rng.randint(20, 90)))
+                work.sanctioned_on = _iso(sanctioned_on)
+                work.expected_completion_on = _iso(
+                    sanctioned_on + timedelta(days=duration))
+
+            if primary == "ghost_asset":
+                # Complete, fully paid, and no evidence will be written.
+                sanctioned_on = date.fromisoformat(work.sanctioned_on)
+                completed_on = sanctioned_on + timedelta(days=rng.randint(20, 90))
+                if completed_on > ref:
+                    completed_on = ref - timedelta(days=rng.randint(5, 40))
+                work.status = "completed"
+                work.completed_on = _iso(max(completed_on, sanctioned_on))
+                work.progress_pct = 100.0
+                if work.final_cost is None:
+                    work.final_cost = int(round(
+                        work.estimated_cost * rng.uniform(0.98, 1.05)))
+                # Older than C7_STALE_DAYS while fully paid, so the
+                # stale-while-paid component lands on top of the missing
+                # evidence rather than the record looking freshly touched.
+                work.last_updated_on = _iso(min(
+                    date.fromisoformat(work.completed_on),
+                    ref - timedelta(days=config.STACKED_STALE_DAYS)))
+            else:
+                work.status = "in_progress"
+                work.completed_on = None
+                work.progress_pct = round(
+                    rng.uniform(*config.PAYMENT_AHEAD_PROGRESS_RANGE) * 100, 1)
+
+            work.planted_anomaly = primary
+            stacked.append((work, [primary, secondary]))
+
+    return stacked
 
 
 # ---------------------------------------------------------------------------
@@ -1061,7 +1172,8 @@ def plant_vendor_overpricing(session, rng, works, vendors):
 # ---------------------------------------------------------------------------
 
 
-def build_child_records(session, rng, fake, works, users, sparse_work_ids):
+def build_child_records(session, rng, fake, works, users, sparse_work_ids,
+                        stacked=()):
     """Money, progress history and proof, keyed off each work's label.
 
     Clean rows keep the payment ratio within CLEAN_MAX_PAYMENT_PROGRESS_GAP
@@ -1178,8 +1290,13 @@ def build_child_records(session, rng, fake, works, users, sparse_work_ids):
     # Weighted toward works that already look troubled, as real reports are
     # -- but never onto a clean work, which would stack C6 on top of any
     # incidental C1 fence hit and manufacture a false-positive alert.
+    # The stacked works are handled separately below, with a fixed number of
+    # verified reports, so they must not also draw a random count here.
+    stacked_ids = {w.work_id for w, _ in stacked}
+
     candidates = [w for w in works if w.planted_anomaly in
-                  ("ghost_asset", "long_delay", "payment_ahead_of_work")]
+                  ("ghost_asset", "long_delay", "payment_ahead_of_work")
+                  and w.work_id not in stacked_ids]
     rng.shuffle(candidates)
 
     for work in candidates[:90]:
@@ -1201,6 +1318,30 @@ def build_child_records(session, rng, fake, works, users, sparse_work_ids):
                 created_at=_iso(ref - timedelta(days=rng.randint(10, 300))),
             ))
 
+    # The stacked works need C6's top band (4+ distinct verified reporters)
+    # to clear 70, so the count is fixed and verified = 1 outright rather
+    # than left to the coin flip above. A critical count that moved with the
+    # random draw would not be reproducible, and reproducibility is the whole
+    # reason REFERENCE_DATE and RANDOM_SEED are pinned.
+    for work, _labels in stacked:
+        for citizen in rng.sample(citizens, config.STACKED_CRITICAL_COMPLAINTS):
+            complaints.append(Complaint(
+                work_id=work.work_id,
+                user_id=citizen.user_id,
+                text=rng.choice((
+                    "Work has not progressed for several months.",
+                    "Site appears incomplete despite completion notice.",
+                    "Requesting verification of this work.",
+                    "No activity observed at the location.",
+                )),
+                photo_path=None,
+                lat=work.lat,
+                lon=work.lon,
+                verified=1,
+                verified_by=rng.choice(officers).user_id if officers else None,
+                created_at=_iso(ref - timedelta(days=rng.randint(10, 300))),
+            ))
+
     session.add_all(complaints)
     session.flush()
     return payments, updates, evidence, complaints
@@ -1211,7 +1352,8 @@ def build_child_records(session, rng, fake, works, users, sparse_work_ids):
 # ---------------------------------------------------------------------------
 
 
-def reconcile_allocations(session, rng, works, allocations, mps):
+def reconcile_allocations(session, rng, works, allocations, mps,
+                          demo_state_id=None):
     """Set allocations.spent from the works, then force 4 MPs under the SC floor.
 
     quota_shortfall is an MP-level anomaly: it writes no work-level label,
@@ -1253,7 +1395,17 @@ def reconcile_allocations(session, rng, works, allocations, mps):
         mp_id for mp_id in {w.mp_id for w in works}
         if released_by_mp.get(mp_id, 0) > 0
     )
-    shortfall_mps = rng.sample(eligible, config.PLANTED_QUOTA_SHORTFALL_MPS)
+
+    # One of them must sit in the demo's state. MP-quota alerts route to the
+    # State Officer, and the demo signs in as so.mh to show exactly the rows
+    # a district officer does not get -- left to chance all four landed in
+    # other states and that worklist had nothing on it.
+    demo_state = {mp.mp_id for mp in mps
+                  if mp.state_id == demo_state_id} & set(eligible)
+    pinned = [min(demo_state)] if demo_state else []
+    rest = rng.sample([m for m in eligible if m not in pinned],
+                      config.PLANTED_QUOTA_SHORTFALL_MPS - len(pinned))
+    shortfall_mps = sorted(pinned + rest)
     for mp_id in shortfall_mps:
         mp_works = [w for w in works
                     if w.mp_id == mp_id and w.is_sc_area == 1
@@ -1338,8 +1490,8 @@ def generate() -> dict:
         nudged = decollide_duplicates(works)
         session.flush()
 
-        works = plant_anomalies(session, rng, works, mps, districts,
-                                agencies, vendors)
+        works, stacked = plant_anomalies(session, rng, works, mps, districts,
+                                         agencies, vendors)
 
         # Before the de-collision sweep, so repriced works are de-collided
         # like any other. These works stay unlabelled -- the anomaly belongs
@@ -1370,9 +1522,12 @@ def generate() -> dict:
         session.flush()
 
         payments, updates, evidence, complaints = build_child_records(
-            session, rng, fake, works, users, sparse_ids)
+            session, rng, fake, works, users, sparse_ids, stacked)
+        demo_state = next((s for s in states
+                           if s.code == config.DEMO_STATE_CODE), None)
         shortfall_mps = reconcile_allocations(
-            session, rng, works, allocations, mps)
+            session, rng, works, allocations, mps,
+            demo_state.state_id if demo_state else None)
 
         # Ground truth for the two subject-level anomalies, which have no
         # planted_anomaly column to live in.
@@ -1381,10 +1536,27 @@ def generate() -> dict:
         record_planted_subjects(session, "vendor", "vendor_overpricing",
                                 overpriced_vendors)
 
+        # Secondary labels of the stacked works, for the same reason: a work
+        # has one planted_anomaly column and these carry two problems. The
+        # primary label stays in the column so the existing per-label table
+        # and build_child_records' dispatch keep working; the extra label is
+        # recorded here and merged back by evaluate.py, so each component
+        # label is still measured on every work that actually carries it.
+        secondary = {}
+        for work, labels in stacked:
+            for label in labels[1:]:
+                secondary.setdefault(label, []).append(work.work_id)
+        for label, work_ids in sorted(secondary.items()):
+            record_planted_subjects(session, "work", label, sorted(work_ids))
+
         planted = {}
         for work in works:
             if work.planted_anomaly:
                 planted[work.planted_anomaly] = planted.get(work.planted_anomaly, 0) + 1
+
+        stacked_by_primary = {}
+        for _work, labels in stacked:
+            stacked_by_primary[labels[0]] = stacked_by_primary.get(labels[0], 0) + 1
 
         return {
             "states": len(states),
@@ -1405,6 +1577,8 @@ def generate() -> dict:
             "overpriced_vendors": len(overpriced_vendors),
             "sparse": len(sparse),
             "quota_shortfall_mps": len(shortfall_mps),
+            "stacked_critical": len(stacked),
+            "stacked_by_primary": stacked_by_primary,
         }
 
 
@@ -1425,14 +1599,24 @@ def main() -> None:
 
     print("\n  Planted anomalies (ground truth for evaluate.py)")
     total = 0
+    stacked_primaries = counts["stacked_by_primary"]
     for label in sorted(counts["planted"]):
         found = counts["planted"][label]
-        target = config.PLANTED_ANOMALY_COUNTS.get(label, 0)
+        # Stacked works carry their C7 label in the column too, so the
+        # single-label target only accounts for part of the count.
+        target = (config.PLANTED_ANOMALY_COUNTS.get(label, 0)
+                  + stacked_primaries.get(label, 0))
         flag = "" if found == target else f"  <-- expected {target}"
-        print(f"    {label:24} {found:>4}{flag}")
+        extra = (f"  ({stacked_primaries[label]} stacked)"
+                 if stacked_primaries.get(label) else "")
+        print(f"    {label:24} {found:>4}{flag}{extra}")
         total += found
     print(f"    {'quota_shortfall (MPs)':24} {counts['quota_shortfall_mps']:>4}")
     print(f"    {'total work-level':24} {total:>4}")
+
+    # Counted once each here; evaluate.py credits them under both labels.
+    print(f"\n  Stacked critical works (2 labels each): "
+          f"{counts['stacked_critical']}")
 
     print(f"    {'vendor_overpricing (vendors)':24} "
           f"{counts['overpriced_vendors']:>4}")
