@@ -22,5 +22,10 @@ mplads.db-wal
 # no persistent disk or build step for it, so the build must be committed.
 # Same reason backend/mplads.db is tracked.
 
+# Citizen photo uploads. Not committed, and NOT persistent in deployment:
+# Render's free tier has no disk, so these do not survive a restart. A real
+# deployment writes to object storage instead.
+uploads/
+
 # Local dev overrides -- per-machine port config, never shared.
 frontend/vite.config.local.mjs

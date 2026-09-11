@@ -9,6 +9,7 @@ import { titleCase, isoDate } from "../format";
 import {
   PointsBreakdown, ChecksCoverage, WorkSubject, MpSubject, VendorSubject,
   DistrictSubject, PaymentsTable, ProgressTable, EvidenceTable, ComplaintsTable,
+  RatingPanel,
 } from "./panels";
 
 const ROUTE_LABEL = {
@@ -95,7 +96,14 @@ export default function AlertDetail({ basePath, portalName }) {
           {alert.payments && <PaymentsTable payments={alert.payments} />}
           {alert.progress_updates && <ProgressTable updates={alert.progress_updates} />}
           {alert.evidence && <EvidenceTable evidence={alert.evidence} />}
-          {alert.complaints && <ComplaintsTable complaints={alert.complaints} />}
+          {alert.rating_summary && <RatingPanel summary={alert.rating_summary} />}
+          {alert.complaints && (
+            <ComplaintsTable
+              complaints={alert.complaints}
+              canAct={alert.can_act}
+              onVerified={reload}
+            />
+          )}
 
           <ChecksCoverage run={alert.checks_run} skipped={alert.checks_skipped} />
         </>

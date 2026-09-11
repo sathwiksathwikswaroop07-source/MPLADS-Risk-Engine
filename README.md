@@ -176,9 +176,18 @@ one shared dependency — never from a query parameter, never in the frontend.
 | 10 | Citizen portal | done |
 | 11 | CSV / Excel upload | not built |
 | 12 | Demo seed data and polish | done |
+| 13 | Camera capture, citizen rating, complaint verification | done |
 
 Steps 09 and 11 are genuinely not built. `/oversight` currently reuses the
 officer worklist with the action buttons removed.
+
+**Citizen photo uploads are not persistent in deployment.** Render's free tier
+has no disk that survives a restart — the same reason `frontend/dist` and
+`mplads.db` are committed — so photographs written to `uploads/` are lost on
+redeploy and the app returns an ordinary 404 for them. A real deployment writes
+to object storage instead. Every upload is re-encoded on arrival, which strips
+its EXIF: a phone photograph carries GPS, a device serial and timestamps, and
+the only location stored is the one the citizen consented to send.
 
 ## Data boundary
 

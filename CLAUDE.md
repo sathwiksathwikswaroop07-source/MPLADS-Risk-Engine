@@ -126,6 +126,7 @@ Mark a step complete only when its Definition of Done passes.
 | 10 | Citizen portal and complaint page | ☑ |
 | 11 | CSV / Excel upload | ☐ |
 | 12 | Demo seed data and polish | ☑ |
+| 13 | Camera capture, citizen rating, complaint verification | ☑ |
 
 **Steps 01–08 are the minimum viable prototype.** Step 08 sits ahead of
 the extra screens deliberately — the accuracy number is worth more than
@@ -149,7 +150,7 @@ recall number on your slide would stop matching the app.
 
 ## Database schema
 
-Sixteen tables. Defined in `backend/models.py`. Column order is
+Seventeen tables. Defined in `backend/models.py`. Column order is
 normative. Full rationale in
 `.claude/specs/01-project-skeleton-schema.md`.
 
@@ -368,6 +369,28 @@ UNIQUE(work_id, user_id)
 One complaint per citizen per work. That constraint is what makes C6's
 distinct-reporter count meaningful and stops one person inflating a
 score.
+
+`photo_path` holds a citizen's camera capture, relative to the upload
+directory. **A citizen photograph is never an `evidence` row.** `evidence` is
+official proof and its absence is what C7 detects: a citizen photographing a
+road must not be able to clear the ghost-asset flag on a work that was never
+built, and C7's reused-photo self-join has no provenance filter, so two
+citizens photographing the same landmark would manufacture a false positive.
+Nothing a citizen uploads moves a score.
+
+Every upload is re-encoded before it is written, which strips EXIF. A phone
+photograph carries GPS, a device serial and timestamps; the only location
+stored is the one the citizen consented to send. Uploads live on an
+**ephemeral** disk — Render's free tier has none that persists — so a missing
+file is an ordinary 404, not an error.
+
+**`ratings`** — `rating_id · work_id · user_id · stars · comment ·
+created_at` · UNIQUE(work_id, user_id) · CHECK(stars BETWEEN 1 AND 5)
+
+Citizen ratings of completed works. **Feeds no check and awards no points.**
+An unverified public rating driving a risk score would be an accusation the
+system has not earned, and it would be trivially brigadable. Returned as an
+average and a count; who rated what is never exposed.
 
 ### Group E — Accountability
 
@@ -935,6 +958,9 @@ step is not done.
 | C1 ratio points without clearing the fence | A tight peer group flags half of itself |
 | `checks.py` reading `BASE_UNIT_COST` | Scoring against our own generator = fake recall |
 | Summing per-label planted counts | Double-counts stacked works in recall and precision |
+| A citizen photo written as an `evidence` row | Clears C7's ghost-asset flag and can trip the reused-photo check |
+| Serving uploads from a `StaticFiles` mount | Every citizen's photograph becomes world-readable, bypassing scope |
+| Writing client bytes to disk unchanged | Stores the EXIF -- GPS, device serial -- that models.py calls a liability |
 | Comma-joining labels into `planted_anomaly` | Phantom label rows; real labels silently lose recall |
 | Scoring an MP who has no works | Zero over zero reads as a total quota breach and awards the max |
 

@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import * as api from "../api";
 import { rupees, isoDate, titleCase, percent } from "../format";
 
 export function Field({ label, children }) {
@@ -239,25 +241,136 @@ export function EvidenceTable({ evidence }) {
   );
 }
 
-export function ComplaintsTable({ complaints }) {
+// The photograph is behind a scoped route that needs the bearer token, so it
+// is fetched as a blob rather than handed to <img src>. A missing file is the
+// ordinary case in deployment -- uploads sit on an ephemeral disk -- so it
+// reads as a plain line, not an error.
+function ComplaintPhoto({ complaintId }) {
+  const [url, setUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let objectUrl = null;
+    let current = true;
+    api.complaintPhotoObjectUrl(complaintId, "officer")
+      .then((result) => {
+        objectUrl = result;
+        if (current) setUrl(result);
+        else URL.revokeObjectURL(result);
+      })
+      .catch(() => { if (current) setFailed(true); });
+    return () => {
+      current = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [complaintId]);
+
+  if (failed) return <span className="mono">photograph unavailable</span>;
+  if (!url) return <span className="mono">loading…</span>;
+  return (
+    <a href={url} target="_blank" rel="noreferrer">
+      <img className="complaint-thumb" src={url}
+           alt="Photograph submitted with this report" />
+    </a>
+  );
+}
+
+export function ComplaintsTable({ complaints, canAct, onVerified }) {
+  const [busy, setBusy] = useState(null);
+  const [error, setError] = useState(null);
+
+  async function verify(complaintId) {
+    setBusy(complaintId);
+    setError(null);
+    try {
+      await api.verifyComplaint(complaintId);
+      onVerified?.();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <Panel title={`Citizen reports (${complaints.length})`}>
       {complaints.length === 0 ? (
         <p className="panel-empty">No citizen reports on this work.</p>
       ) : (
-        <table>
-          <thead><tr><th>Filed</th><th>Verified</th><th>Report</th></tr></thead>
-          <tbody>
-            {complaints.map((c) => (
-              <tr key={c.complaint_id}>
-                <td>{isoDate(c.created_at)}</td>
-                <td>{c.verified ? "Verified" : "Unverified"}</td>
-                <td>{c.text}</td>
+        <>
+          <table>
+            <thead>
+              <tr>
+                <th>Filed</th><th>Verified</th><th>Report</th>
+                <th>Photo</th>{canAct && <th />}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {complaints.map((c) => (
+                <tr key={c.complaint_id}>
+                  <td>{isoDate(c.created_at)}</td>
+                  <td>{c.verified ? "Verified" : "Unverified"}</td>
+                  <td>
+                    {c.text}
+                    {c.lat != null && c.lon != null && (
+                      <div className="complaint-coords mono">
+                        {c.lat.toFixed(5)}, {c.lon.toFixed(5)}
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    {c.has_photo
+                      ? <ComplaintPhoto complaintId={c.complaint_id} />
+                      : <span className="panel-empty">None</span>}
+                  </td>
+                  {canAct && (
+                    <td>
+                      {/* Verifying is the one action here that changes a
+                          score: C6 counts distinct verified reporters. */}
+                      {c.verified ? null : (
+                        <button type="button"
+                                disabled={busy === c.complaint_id}
+                                onClick={() => verify(c.complaint_id)}>
+                          {busy === c.complaint_id ? "Verifying…" : "Verify"}
+                        </button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {error && (
+            <p className="login-error">
+              {error.detail || "The report could not be verified."}
+            </p>
+          )}
+          {canAct && (
+            <p className="panel-note">
+              Verifying a report makes it count towards this work's score at
+              the next scoring run, and records who verified it.
+            </p>
+          )}
+        </>
       )}
+    </Panel>
+  );
+}
+
+export function RatingPanel({ summary }) {
+  if (!summary || !summary.count) return null;
+  return (
+    <Panel title="Resident rating">
+      <p>
+        <strong>{summary.average}</strong> out of 5 from {summary.count}{" "}
+        {summary.count === 1 ? "resident" : "residents"}.
+      </p>
+      {/* Said plainly, because a number beside a risk score invites being
+          read as part of it. */}
+      <p className="panel-note">
+        Context for your verification. Ratings are not verified and award no
+        points towards the risk score.
+      </p>
     </Panel>
   );
 }
