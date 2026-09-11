@@ -73,6 +73,24 @@ export default function PhotoCapture({ photo, onChange, disabled }) {
   // recording indicator on, which on a civic page reads as a bug at best.
   useEffect(() => stop, [stop]);
 
+  // Attach the stream once the <video> is actually in the DOM. This cannot
+  // be done in start(): setLive(true) only schedules the render, so the ref
+  // is still null on the next line and the element renders black while the
+  // camera light is on -- acquired, but never shown.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!live || !video || !streamRef.current) return;
+
+    video.srcObject = streamRef.current;
+    // Safari rejects play() if the element is not ready; it also fires
+    // loadedmetadata late. Catch rather than throw -- the preview recovers on
+    // the event below.
+    video.play().catch(() => {});
+    const onReady = () => video.play().catch(() => {});
+    video.addEventListener("loadedmetadata", onReady);
+    return () => video.removeEventListener("loadedmetadata", onReady);
+  }, [live]);
+
   async function start() {
     setError("");
     if (!cameraSupported()) {
@@ -81,16 +99,19 @@ export default function PhotoCapture({ photo, onChange, disabled }) {
       return;
     }
     try {
+      // "ideal", not "exact": a phone gets its rear camera, and a laptop --
+      // which has no environment-facing camera at all -- falls back to the
+      // one it has instead of throwing OverconstrainedError.
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+        video: { facingMode: { ideal: "environment" } },
         audio: false,
       });
       streamRef.current = stream;
+      // Attaching happens in the effect below, not here: setLive is a state
+      // update, so the <video> does not exist yet on this line and
+      // videoRef.current is still null. Assigning srcObject here acquires
+      // the camera -- the indicator light comes on -- but shows black.
       setLive(true);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
     } catch (err) {
       // Denying the camera is an ordinary choice, not a failure state: the
       // photograph is optional and the report sends without one.
@@ -102,8 +123,14 @@ export default function PhotoCapture({ photo, onChange, disabled }) {
   }
 
   async function capture() {
-    if (!videoRef.current) return;
-    const blob = await drawToBlob(videoRef.current);
+    const video = videoRef.current;
+    // videoWidth is 0 until the first frame has arrived; drawing then gives
+    // a blank image rather than an error, which is worse than waiting.
+    if (!video || !video.videoWidth) {
+      setError("The camera is still starting. Try again in a moment.");
+      return;
+    }
+    const blob = await drawToBlob(video);
     stop();
     onChange(blob);
   }

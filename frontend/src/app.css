@@ -479,8 +479,11 @@
 
 .photo-capture { margin-top: 8px; }
 .capture-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/* aspect-ratio keeps the frame a sensible shape before metadata loads -- a
+   <video> with no dimensions yet otherwise renders as a tall empty box. */
 .capture-live video {
-  width: 100%; max-width: 420px; border-radius: var(--radius);
+  width: 100%; max-width: 420px; aspect-ratio: 4 / 3;
+  object-fit: cover; border-radius: var(--radius);
   border: 1px solid var(--border); background: var(--surface-2);
   display: block; margin-bottom: 8px;
 }
