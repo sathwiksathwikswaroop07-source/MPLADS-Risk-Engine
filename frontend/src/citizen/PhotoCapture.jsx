@@ -27,10 +27,20 @@ function drawToBlob(video) {
 }
 
 /**
- * Capture one photograph, either from the live camera or from a file.
+ * Capture one photograph from the live camera.
  *
- * Reports the chosen image upward as a Blob. The parent owns whether a
- * photograph is required -- here it is always optional.
+ * Live capture ONLY -- there is deliberately no file picker. The photograph
+ * exists so an officer can see the site as it is now; letting someone attach
+ * any image from their device would let an old or borrowed photo stand in for
+ * one taken there, which is the opposite of what it is for. A capture cannot
+ * be faked as casually.
+ *
+ * That is a deterrent, not a guarantee: nothing here proves a camera was
+ * pointed at the work rather than at a screen. It raises the effort, and the
+ * officer verifying still decides.
+ *
+ * Reports the captured image upward as a Blob. The photograph is optional --
+ * no camera, or a declined permission, still sends the report.
  */
 export default function PhotoCapture({ photo, onChange, disabled }) {
   const videoRef = useRef(null);
@@ -66,8 +76,8 @@ export default function PhotoCapture({ photo, onChange, disabled }) {
   async function start() {
     setError("");
     if (!cameraSupported()) {
-      setError("This browser cannot open a camera here. "
-        + "Use “Choose a photo” instead.");
+      setError("This browser cannot open a camera here. A camera needs a "
+        + "secure (https) connection.");
       return;
     }
     try {
@@ -82,10 +92,11 @@ export default function PhotoCapture({ photo, onChange, disabled }) {
         await videoRef.current.play();
       }
     } catch (err) {
-      // Denying the camera is an ordinary choice, not a failure state.
+      // Denying the camera is an ordinary choice, not a failure state: the
+      // photograph is optional and the report sends without one.
       setError(err?.name === "NotAllowedError"
-        ? "Camera permission was declined. You can still attach a photo from your device."
-        : "No camera is available. You can still attach a photo from your device.");
+        ? "Camera permission was declined. You can still send the report without a photograph."
+        : "No camera is available on this device. You can still send the report without a photograph.");
       setLive(false);
     }
   }
@@ -95,11 +106,6 @@ export default function PhotoCapture({ photo, onChange, disabled }) {
     const blob = await drawToBlob(videoRef.current);
     stop();
     onChange(blob);
-  }
-
-  function pickFile(event) {
-    const file = event.target.files?.[0];
-    if (file) onChange(file);
   }
 
   return (
@@ -125,15 +131,6 @@ export default function PhotoCapture({ photo, onChange, disabled }) {
           <button type="button" onClick={start} disabled={disabled}>
             Open camera
           </button>
-          {/* capture="environment" opens the camera directly on a phone and
-              the file picker on a laptop, so this is both the fallback and
-              the better path on desktop. */}
-          <label className="capture-file">
-            Choose a photo
-            <input type="file" accept="image/jpeg,image/png"
-                   capture="environment" onChange={pickFile}
-                   disabled={disabled} />
-          </label>
         </div>
       )}
 

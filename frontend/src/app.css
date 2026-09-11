@@ -488,15 +488,6 @@
   max-width: 260px; border-radius: var(--radius);
   border: 1px solid var(--border); display: block; margin-bottom: 8px;
 }
-/* A styled label, because a bare file input cannot be restyled reliably. */
-.capture-file {
-  display: inline-block; padding: 7px 12px; cursor: pointer;
-  font-size: 13px; color: var(--text);
-  background: var(--surface-2); border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.capture-file:hover { border-color: var(--accent); }
-.capture-file input { display: none; }
 .capture-note { margin: 8px 0 0; font-size: 12px; color: var(--text-faint); max-width: 60ch; }
 .capture-consent {
   display: flex; gap: 8px; align-items: flex-start; margin-top: 10px;

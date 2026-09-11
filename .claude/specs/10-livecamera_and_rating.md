@@ -90,6 +90,13 @@ needed nothing new.
 - Out of scope is **404**, never 403, on every new route.
 - The photograph is optional throughout. A report with no photograph must
   behave exactly as it did before.
+- **Live capture only -- no file picker.** The photograph exists so an officer
+  can see the site as it is now; letting someone attach any image from their
+  device would let an old or borrowed photo stand in for one taken there. A
+  deterrent rather than a guarantee -- nothing proves the camera was pointed
+  at the work rather than at a screen -- but it raises the effort, and the
+  officer verifying still decides. No camera, or a declined permission, still
+  sends the report.
 - `created_at` keeps using `REFERENCE_DATE`. No wall clock.
 
 ## What the work uncovered
