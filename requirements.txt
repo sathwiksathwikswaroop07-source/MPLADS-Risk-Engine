@@ -41,6 +41,17 @@ Faker==40.37.0
 # Reads the .xlsx an officer exports from eSAKSHI (step 11).
 openpyxl==3.1.5
 
+# --- Citizen photo uploads ------------------------------------------------
+# Re-encodes every uploaded photograph, which is what STRIPS ITS EXIF. A
+# phone photo carries GPS, a device serial and timestamps; models.py calls
+# identifying data a liability and this is the code that makes that promise
+# real rather than aspirational. It also bounds the stored file size.
+#
+# Listed despite the "deliberately absent" note below because it earns its
+# place: the alternative is trusting the client to have removed metadata, or
+# storing it.
+Pillow==12.3.0
+
 # --- Testing --------------------------------------------------------------
 # Required by fastapi.testclient, which is how the API's access-control
 # guarantees are verified -- driven through HTTP rather than by reading the

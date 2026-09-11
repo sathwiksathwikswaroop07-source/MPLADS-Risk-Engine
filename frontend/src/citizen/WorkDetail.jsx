@@ -6,6 +6,7 @@ import { Loading, ErrorBox } from "../components/States";
 import { rupees, isoDate, titleCase, percent } from "../format";
 import { OverdueBadge, StatusPill } from "./WorkCard";
 import ComplaintForm from "./ComplaintForm";
+import RatingWidget from "./RatingWidget";
 
 function Field({ label, children }) {
   return (
@@ -134,9 +135,20 @@ export default function WorkDetail() {
             </section>
           )}
 
+          {/* Rating a work that is still being built measures nothing, so
+              the widget only appears once it is complete. */}
+          {work.status === "completed" && (
+            <RatingWidget
+              workId={work.work_id}
+              summary={work.rating_summary}
+              onRated={reload}
+            />
+          )}
+
           <ComplaintForm
             workId={work.work_id}
             verifiedCount={work.complaint_count}
+            onFiled={reload}
           />
         </>
       )}

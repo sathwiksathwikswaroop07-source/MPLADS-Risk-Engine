@@ -27,7 +27,8 @@ from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import (APIRouter, Depends, FastAPI, File, Form, HTTPException,
+                     Request, UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -36,7 +37,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend import auth, config
+from backend import auth, config, uploads
 from backend.db import get_db
 
 REF = config.REFERENCE_DATE
@@ -166,6 +167,11 @@ class ComplaintRequest(BaseModel):
     text: str = Field(min_length=10, max_length=2000)
     lat: float | None = None
     lon: float | None = None
+
+
+class RatingRequest(BaseModel):
+    stars: int = Field(ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=500)
 
 
 # ---------------------------------------------------------------------------
@@ -328,13 +334,34 @@ def citizen_work_detail(
         WHERE work_id = :work_id AND verified = 1
     """), {"work_id": work_id}).scalar()
 
+    work["rating_summary"] = _rating_summary(db, work_id)
+
     return work
 
 
+def _rating_summary(db: Session, work_id: int) -> dict:
+    """Average and count of citizen ratings for one work.
+
+    A summary, never the individual rows: a rating is attached to a named
+    citizen account, and who rated what is not public.
+    """
+    row = db.execute(text("""
+        SELECT COUNT(*) AS count, AVG(stars) AS average
+        FROM ratings WHERE work_id = :work_id
+    """), {"work_id": work_id}).mappings().one()
+    return {
+        "count": row["count"],
+        "average": round(row["average"], 1) if row["count"] else None,
+    }
+
+
 @citizen_router.post("/works/{work_id}/complaint", status_code=201)
-def file_complaint(
+async def file_complaint(
     work_id: int,
-    body: ComplaintRequest,
+    text_: str = Form(alias="text", min_length=10, max_length=2000),
+    lat: float | None = Form(default=None),
+    lon: float | None = Form(default=None),
+    photo: UploadFile | None = File(default=None),
     principal: auth.Principal = Depends(require_citizen),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -342,6 +369,17 @@ def file_complaint(
 
     UNIQUE(work_id, user_id) is what makes C6's distinct-reporter count
     meaningful, so a second attempt is refused rather than silently accepted.
+
+    Multipart rather than JSON, because a report may carry a photograph the
+    citizen captured at the site. The photograph is optional and a report
+    without one behaves exactly as it always has.
+
+    The photograph is stored against the COMPLAINT, never as an `evidence`
+    row. evidence is official proof and its absence is what C7 detects -- a
+    citizen photographing a road must not be able to clear the ghost-asset
+    flag on a work that was never built, and two citizens photographing the
+    same landmark must not trip the reused-photo check. Nothing a citizen
+    uploads moves a score; it is material for the officer who verifies.
     """
     where, params = auth.scope_filter(principal)
     params["work_id"] = work_id
@@ -351,8 +389,19 @@ def file_complaint(
     if not exists:
         raise HTTPException(404, "Work not found.")
 
+    # Read and re-encode BEFORE the insert: a photograph that turns out not
+    # to be an image should fail the request, not leave a complaint row
+    # pointing at a file that was never written.
+    image_bytes = None
+    if photo is not None and photo.filename:
+        raw = await photo.read()
+        try:
+            image_bytes = uploads.normalise(raw)
+        except uploads.UploadError as exc:
+            raise HTTPException(400, str(exc)) from None
+
     try:
-        db.execute(text("""
+        result = db.execute(text("""
             INSERT INTO complaints
                 (work_id, user_id, text, photo_path, lat, lon, verified,
                  verified_by, created_at)
@@ -362,11 +411,24 @@ def file_complaint(
         """), {
             "work_id": work_id,
             "user_id": principal.user_id,
-            "text": body.text,
-            "lat": body.lat,
-            "lon": body.lon,
+            "text": text_,
+            "lat": lat,
+            "lon": lon,
             "created_at": REF.isoformat(),
         })
+
+        # The path is keyed by complaint_id, so it is only known once the row
+        # exists. Written inside the transaction: if the write fails the
+        # complaint is rolled back rather than left claiming a missing file.
+        if image_bytes is not None:
+            complaint_id = result.lastrowid
+            relative = uploads.complaint_photo_path(work_id, complaint_id)
+            uploads.write_photo(relative, image_bytes)
+            db.execute(text("""
+                UPDATE complaints SET photo_path = :path
+                WHERE complaint_id = :complaint_id
+            """), {"path": relative, "complaint_id": complaint_id})
+
         auth.record_action(db, principal, "complaint_filed", "work", work_id)
         db.commit()
     except IntegrityError:
@@ -376,6 +438,103 @@ def file_complaint(
 
     return {"status": "received",
             "message": "Your report has been recorded for verification."}
+
+
+@citizen_router.get("/complaints/{complaint_id}/photo")
+def citizen_complaint_photo(
+    complaint_id: int,
+    principal: auth.Principal = Depends(require_citizen),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """One complaint's photograph, scoped like every other citizen read.
+
+    A route rather than a StaticFiles mount on the upload directory: a mount
+    would make every citizen's photograph world-readable by URL and bypass
+    scope_filter entirely.
+    """
+    return _complaint_photo_response(db, complaint_id,
+                                     *auth.scope_filter(principal))
+
+
+def _complaint_photo_response(db: Session, complaint_id: int,
+                              where: str, params: dict) -> FileResponse:
+    """Shared by the citizen and officer photo routes.
+
+    Out of scope is 404, not 403 -- the response must not confirm that a
+    photograph the caller may not see exists.
+    """
+    params = {**params, "complaint_id": complaint_id}
+    row = db.execute(text(f"""
+        SELECT complaints.photo_path
+        FROM complaints
+        JOIN works ON works.work_id = complaints.work_id
+        JOIN districts ON districts.district_id = works.district_id
+        WHERE complaints.complaint_id = :complaint_id AND {where}
+    """), params).mappings().one_or_none()
+
+    if row is None or not row["photo_path"]:
+        raise HTTPException(404, "Photograph not found.")
+
+    try:
+        path = uploads.resolve_upload(row["photo_path"])
+    except uploads.UploadError:
+        raise HTTPException(404, "Photograph not found.") from None
+
+    if not path.is_file():
+        # Expected in deployment: Render's free tier has no persistent disk,
+        # so uploads do not survive a restart. A missing file is a 404, not a
+        # 500 -- the row is still a legitimate report.
+        raise HTTPException(404, "Photograph is no longer available.")
+
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@citizen_router.post("/works/{work_id}/rating", status_code=201)
+def rate_work(
+    work_id: int,
+    body: RatingRequest,
+    principal: auth.Principal = Depends(require_citizen),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Rate a completed work 1-5.
+
+    Only completed works: rating a road that is still being built measures
+    nothing. UNIQUE(work_id, user_id) stops one person moving the average,
+    and a second attempt is refused rather than silently replacing the first.
+
+    This feeds no check. See models.Rating for why.
+    """
+    where, params = auth.scope_filter(principal)
+    params["work_id"] = work_id
+    row = db.execute(text(f"""
+        SELECT works.status {_CITIZEN_FROM}
+        WHERE works.work_id = :work_id AND {where}
+    """), params).mappings().one_or_none()
+    if row is None:
+        raise HTTPException(404, "Work not found.")
+    if row["status"] != "completed":
+        raise HTTPException(
+            400, "Only completed works can be rated.")
+
+    try:
+        db.execute(text("""
+            INSERT INTO ratings (work_id, user_id, stars, comment, created_at)
+            VALUES (:work_id, :user_id, :stars, :comment, :created_at)
+        """), {
+            "work_id": work_id,
+            "user_id": principal.user_id,
+            "stars": body.stars,
+            "comment": body.comment,
+            "created_at": REF.isoformat(),
+        })
+        auth.record_action(db, principal, "work_rated", "work", work_id,
+                           detail=f"stars={body.stars}")
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "You have already rated this work.") from None
+
+    return {"status": "recorded", "message": "Thank you for rating this work."}
 
 
 # ---------------------------------------------------------------------------
@@ -569,10 +728,18 @@ def alert_detail(
             FROM evidence WHERE work_id = :work_id ORDER BY evidence_id
         """), {"work_id": work_id}).mappings().all()]
 
+        # has_photo rather than the path: the officer's client asks for the
+        # image by complaint id through a scoped route, so the storage layout
+        # never reaches the browser.
         alert["complaints"] = [dict(r) for r in db.execute(text("""
-            SELECT complaint_id, text, verified, created_at
+            SELECT complaint_id, text, verified, created_at, lat, lon,
+                   CASE WHEN photo_path IS NOT NULL THEN 1 ELSE 0 END
+                     AS has_photo
             FROM complaints WHERE work_id = :work_id ORDER BY complaint_id
         """), {"work_id": work_id}).mappings().all()]
+
+        # Context for the verdict, never a component of the score.
+        alert["rating_summary"] = _rating_summary(db, work_id)
 
     elif alert["subject_type"] == "mp":
         alert["mp"] = dict(db.execute(text("""
@@ -678,6 +845,85 @@ def snooze(alert_id: int, body: SnoozeRequest,
                          snoozed_until=until)
     result["snoozed_until"] = until
     return result
+
+
+# ---------------------------------------------------------------------------
+# Complaint verification
+# ---------------------------------------------------------------------------
+#
+# The one officer action here that changes a SCORE. C6 counts distinct
+# verified complaints, so marking one verified can award up to 15 points on
+# the next run of checks.py. That is the intended design -- an unverified
+# report must never move a score, and a verified one is a fact an officer has
+# stood behind -- but it is why the audit_log write is not optional: this is
+# the only record of who decided a public report was true.
+#
+# Until this existed, nothing anywhere could set complaints.verified, so a
+# report filed through the API could never reach C6 at all.
+
+
+def _load_complaint_for_actor(db: Session, principal: auth.Principal,
+                              complaint_id: int) -> dict:
+    """One complaint the principal is entitled to act on, or 404.
+
+    Scoped through the complaint's parent work with the same filter every
+    other route uses. Out of scope is 404, not 403.
+    """
+    where, params = auth.scope_filter(principal)
+    params["complaint_id"] = complaint_id
+    row = db.execute(text(f"""
+        SELECT complaints.complaint_id, complaints.work_id,
+               complaints.verified, complaints.photo_path
+        FROM complaints
+        JOIN works ON works.work_id = complaints.work_id
+        JOIN districts ON districts.district_id = works.district_id
+        WHERE complaints.complaint_id = :complaint_id AND {where}
+    """), params).mappings().one_or_none()
+
+    if row is None:
+        raise HTTPException(404, "Complaint not found.")
+    return dict(row)
+
+
+@officer_router.post("/complaints/{complaint_id}/verify")
+def verify_complaint(complaint_id: int,
+                     principal: auth.Principal = Depends(require_actor),
+                     db: Session = Depends(get_db)) -> dict:
+    """Confirm a citizen's report, so that it counts towards C6.
+
+    require_actor means district and state officers only -- MPs and the
+    Ministry are view-only, and an MP confirming a report about their own
+    constituency's work would invert the accountability the scheme rests on.
+    """
+    complaint = _load_complaint_for_actor(db, principal, complaint_id)
+
+    if complaint["verified"]:
+        return {"complaint_id": complaint_id, "verified": 1,
+                "message": "Already verified."}
+
+    db.execute(text("""
+        UPDATE complaints SET verified = 1, verified_by = :actor
+        WHERE complaint_id = :complaint_id
+    """), {"actor": principal.user_id, "complaint_id": complaint_id})
+
+    auth.record_action(db, principal, "complaint_verified", "work",
+                       complaint["work_id"],
+                       detail=f"complaint_id={complaint_id}")
+    db.commit()
+
+    return {"complaint_id": complaint_id, "verified": 1,
+            "message": "Report verified. It will count at the next scoring run."}
+
+
+@officer_router.get("/complaints/{complaint_id}/photo")
+def officer_complaint_photo(
+    complaint_id: int,
+    principal: auth.Principal = Depends(require_officer_or_oversight),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """The citizen's photograph, for the officer deciding whether to verify."""
+    return _complaint_photo_response(db, complaint_id,
+                                     *auth.scope_filter(principal))
 
 
 # Every API route lives under /api. One service serves both the API and the

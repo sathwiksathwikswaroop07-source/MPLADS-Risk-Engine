@@ -471,3 +471,52 @@
     text-align: left;
   }
 }
+
+/* --- Citizen photo capture and rating ----------------------------------- */
+
+.capture-block { margin: 14px 0; }
+.capture-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 2px; }
+
+.photo-capture { margin-top: 8px; }
+.capture-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.capture-live video {
+  width: 100%; max-width: 420px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface-2);
+  display: block; margin-bottom: 8px;
+}
+.capture-preview img {
+  max-width: 260px; border-radius: var(--radius);
+  border: 1px solid var(--border); display: block; margin-bottom: 8px;
+}
+/* A styled label, because a bare file input cannot be restyled reliably. */
+.capture-file {
+  display: inline-block; padding: 7px 12px; cursor: pointer;
+  font-size: 13px; color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.capture-file:hover { border-color: var(--accent); }
+.capture-file input { display: none; }
+.capture-note { margin: 8px 0 0; font-size: 12px; color: var(--text-faint); max-width: 60ch; }
+.capture-consent {
+  display: flex; gap: 8px; align-items: flex-start; margin-top: 10px;
+  font-size: 12px; color: var(--text-muted); max-width: 68ch;
+}
+.capture-consent input { margin-top: 2px; }
+
+.star-row { display: flex; gap: 4px; margin-bottom: 10px; }
+.star {
+  background: none; border: none; cursor: pointer; padding: 0 2px;
+  font-size: 26px; line-height: 1; color: var(--text-faint);
+}
+.star.on { color: var(--accent); }
+.star:disabled { cursor: default; }
+.rating-summary { margin: 0 0 10px; font-size: 15px; color: var(--text); }
+.rating-summary strong { font-size: 22px; }
+.rating-count { color: var(--text-muted); font-size: 13px; }
+
+.complaint-thumb {
+  width: 72px; height: 54px; object-fit: cover;
+  border-radius: var(--radius); border: 1px solid var(--border); display: block;
+}
+.complaint-coords { margin-top: 3px; }

@@ -47,13 +47,18 @@ export function clearSession() {
 async function request(path, { method = "GET", body } = {}) {
   const token = storedToken();
 
+  // FormData must NOT get an explicit Content-Type: the browser has to set it
+  // itself so it can append the multipart boundary, and JSON.stringify would
+  // turn the whole upload into "[object FormData]".
+  const isForm = body instanceof FormData;
+
   const res = await fetch(BASE + path, {
     method,
     headers: {
-      "Content-Type": "application/json",
+      ...(isForm ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
   });
 
   if (res.status === 204) return null;
@@ -156,9 +161,56 @@ export function getCitizenWork(workId) {
 // UNIQUE(work_id, user_id) means a second attempt returns 409 rather than
 // quietly succeeding -- that constraint is what keeps C6's distinct-reporter
 // count meaningful, so the UI reports the refusal instead of hiding it.
-export function fileComplaint(workId, { text, lat = null, lon = null }) {
+// Multipart, because a report may carry a photograph captured at the site.
+// Every field is optional except the text, and a report with no photograph
+// and no coordinates behaves exactly as it always has.
+export function fileComplaint(workId, { text, lat = null, lon = null, photo = null }) {
+  const form = new FormData();
+  form.append("text", text);
+  if (lat != null) form.append("lat", String(lat));
+  if (lon != null) form.append("lon", String(lon));
+  if (photo) form.append("photo", photo, "capture.jpg");
+
   return request(`/citizen/works/${workId}/complaint`, {
     method: "POST",
-    body: { text, lat, lon },
+    body: form,
+  });
+}
+
+// The photograph is fetched by complaint id through a scoped route, never by
+// a path -- the storage layout never reaches the browser, and a citizen from
+// another constituency gets a 404 rather than the image.
+//
+// Fetched as a blob rather than handed to <img src>, because the route needs
+// the Authorization header and an <img> cannot send one. The caller owns the
+// returned object URL and must revokeObjectURL it on unmount.
+export async function complaintPhotoObjectUrl(complaintId, portal = "citizen") {
+  const token = storedToken();
+  const res = await fetch(`${BASE}/${portal}/complaints/${complaintId}/photo`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    if (res.status === 401) clearSession();
+    // 404 is the ordinary case in deployment, not an anomaly: Render's free
+    // tier has no persistent disk, so uploads do not survive a restart.
+    throw new ApiError(res.status, "Photograph unavailable.");
+  }
+  return URL.createObjectURL(await res.blob());
+}
+
+// UNIQUE(work_id, user_id) again: one rating per citizen per work, so a
+// second attempt is refused rather than quietly replacing the first.
+export function rateWork(workId, { stars, comment = null }) {
+  return request(`/citizen/works/${workId}/rating`, {
+    method: "POST",
+    body: { stars, comment },
+  });
+}
+
+// Verifying is what makes a public report count towards C6, so it is
+// restricted to the two officer roles and written to the audit log.
+export function verifyComplaint(complaintId) {
+  return request(`/officer/complaints/${complaintId}/verify`, {
+    method: "POST",
   });
 }

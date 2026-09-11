@@ -801,3 +801,31 @@ SUBJECT_ROUTING = {
     # the recipient themselves, so there is no conflict in routing it locally.
     "vendor": "district_officer",
 }
+
+# ---------------------------------------------------------------------------
+# Citizen uploads -- camera capture attached to a complaint
+# ---------------------------------------------------------------------------
+
+# Where uploaded photographs are written. Gitignored, and NOT persistent in
+# deployment: Render's free tier has no disk, so these do not survive a
+# restart. That is acceptable for a prototype and is stated plainly in the
+# README rather than discovered during a demo; a real deployment writes to
+# object storage instead.
+UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
+
+# 2 MB. A phone photograph is comfortably under this once re-encoded, and the
+# limit is what stops one upload filling the container's ephemeral disk.
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024
+
+# Sniffed from the first bytes of the file, never taken from the filename or
+# the client's declared content-type -- both are attacker-controlled.
+UPLOAD_MAGIC_BYTES = {
+    b"\xff\xd8\xff": "jpeg",
+    b"\x89PNG\r\n\x1a\n": "png",
+}
+
+# Longest edge, in pixels. Re-encoding at this size strips EXIF (the point --
+# a phone photo carries GPS, device serial and timestamps, which models.py
+# calls a liability) and keeps the stored file small.
+UPLOAD_MAX_EDGE = 1600
+UPLOAD_JPEG_QUALITY = 82

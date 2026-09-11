@@ -522,6 +522,34 @@ class Complaint(Base):
     )
 
 
+class Rating(Base):
+    """A citizen's 1-5 star rating of a completed work.
+
+    UNIQUE(work_id, user_id) for the same reason complaints carry it: one
+    person must not be able to move an average by rating repeatedly.
+
+    Deliberately NOT an input to any check. An unverified public rating
+    driving a risk score would be an accusation the system has not earned --
+    and it would be trivially brigadable. It is context for a human reading
+    the page, and context for the officer deciding whether to visit.
+    """
+
+    __tablename__ = "ratings"
+
+    rating_id = Column(Integer, primary_key=True)
+    work_id = Column(Integer, ForeignKey("works.work_id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    stars = Column(Integer, nullable=False)
+    comment = Column(String)
+    created_at = Column(String, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("work_id", "user_id"),
+        CheckConstraint("stars BETWEEN 1 AND 5"),
+        Index("idx_ratings_work", "work_id"),
+    )
+
+
 # ===========================================================================
 # Group E - Accountability
 # ===========================================================================
