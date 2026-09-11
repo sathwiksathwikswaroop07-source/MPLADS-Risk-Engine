@@ -118,26 +118,6 @@ export default function Login() {
               ))}
             </div>
 
-            <div className="demo-accounts">
-              <p className="demo-caption">
-                Prototype accounts, seeded with the sample data. Selecting one
-                fills the form; you still sign in. Password{" "}
-                <code>{DEMO_PASSWORD}</code>.
-              </p>
-              <div className="demo-chips">
-                {DEMO_ACCOUNTS.map((account) => (
-                  <button
-                    key={account.username}
-                    type="button"
-                    className="demo-chip"
-                    onClick={() => fillDemoAccount(account)}
-                  >
-                    <span className="demo-chip-name">{account.username}</span>
-                    <span className="demo-chip-note">{account.note}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
 
           <form className="login-card" onSubmit={onSubmit} autoComplete="off">
@@ -203,6 +183,28 @@ export default function Login() {
             <button className="primary" type="submit" disabled={busy}>
               {busy ? "Signing in…" : "Sign in"}
             </button>
+
+            {/* Directly under the button, inside the form: an evaluator should
+                not have to find these in the panel beside it. */}
+            <div className="demo-accounts">
+              <p className="demo-caption">
+                Demo accounts — password <code>{DEMO_PASSWORD}</code>. Selecting
+                one fills the form above; press Sign in.
+              </p>
+              <div className="demo-chips">
+                {DEMO_ACCOUNTS.map((account) => (
+                  <button
+                    key={account.username}
+                    type="button"
+                    className="demo-chip"
+                    onClick={() => fillDemoAccount(account)}
+                  >
+                    <span className="demo-chip-name">{account.username}</span>
+                    <span className="demo-chip-note">{account.note}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <div className="login-foot">
               <span>SIH26102</span>
